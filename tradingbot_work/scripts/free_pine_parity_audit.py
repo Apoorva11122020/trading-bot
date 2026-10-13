@@ -54,6 +54,7 @@ def audit_symbol(
     x = df.copy()
     x["session"] = x["ts"].dt.date
     minute_of_day = x["ts"].dt.hour * 60 + x["ts"].dt.minute
+    regular = x.loc[(minute_of_day >= 9 * 60 + 15) & (minute_of_day < 15 * 60 + 30)]
     x = x.join(classic_pivots_from_intraday(x, min_session_bars=min_session_bars), on="session")
 
     x["ema20"] = ema(x["close"], 20)
