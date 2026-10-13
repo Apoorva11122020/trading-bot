@@ -143,3 +143,41 @@ def test_oos_strategy_flat_time_matches_pine_strategy_1500_close():
     })
     prepared = oos_backtest.prepare(candles, volume_filter=False)
     assert prepared["flat_time"].tolist() == [False, True, True]
+
+
+def test_oos_backtest_skips_risk_at_or_below_min_tick():
+    timestamps = pd.to_datetime([
+        "2026-06-01 09:20:00+05:30",
+        "2026-06-01 09:25:00+05:30",
+    ])
+    frame = pd.DataFrame({
+        "ts": timestamps,
+        "session": timestamps.date,
+        "open": [100.0, 100.0],
+        "high": [100.01, 100.01],
+        "low": [99.99, 99.99],
+        "close": [100.0, 100.0],
+        "volume": [0.0, 0.0],
+    })
+    original_prepare = oos_backtest.prepare
+
+    def prepared_with_tiny_risk(df, volume_filter):
+        result = original_prepare(df, volume_filter)
+        result["short_signal"] = False
+        result.loc[result.index[0], "short_signal"] = True
+        result["atr14"] = 0.01
+        return result
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(oos_backtest, "prepare", prepared_with_tiny_risk)
+    try:
+        trades, summary = oos_backtest.backtest(
+            frame, "NIFTY_50", False,
+            pd.Timestamp("2026-06-01"), pd.Timestamp("2026-06-01"),
+            commission_pct=0.0, slippage_points=0.0,
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert trades.empty
+    assert summary["trades"] == 0
