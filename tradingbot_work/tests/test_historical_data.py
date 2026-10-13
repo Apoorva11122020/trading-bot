@@ -88,3 +88,36 @@ def test_client_retries_retryable(monkeypatch):
         client.candles("NSE_INDEX|Nifty 50", "2026-10-01", "2026-10-01")
     assert exc.value.code == "RATE_LIMITED"
     assert calls["n"] == 3
+
+
+
+def test_out_of_session_bad_prices_do_not_count_as_rejected():
+    frame = pd.DataFrame([
+        {
+            "timestamp": datetime(2026, 10, 1, 9, 15, tzinfo=IST),
+            "instrument_key": "k", "open": 10, "high": 11, "low": 9, "close": 10.5,
+            "volume": 1, "open_interest": 0,
+        },
+        {
+            "timestamp": datetime(2026, 10, 1, 15, 30, tzinfo=IST),
+            "instrument_key": "k", "open": 10, "high": 8, "low": 9, "close": 10.5,
+            "volume": 1, "open_interest": 0,
+        },
+    ])
+    clean, report = validate_candles(frame)
+    assert len(clean) == 1
+    assert report.outside_session_rows == 1
+    assert report.rejected_rows == 0
+    assert report.issues == {}
+
+
+def test_missing_volume_is_rejected_and_reported():
+    frame = pd.DataFrame([{
+        "timestamp": datetime(2026, 10, 1, 9, 15, tzinfo=IST),
+        "instrument_key": "k", "open": 10, "high": 11, "low": 9, "close": 10.5,
+        "volume": float("nan"), "open_interest": 0,
+    }])
+    clean, report = validate_candles(frame)
+    assert clean.empty
+    assert report.rejected_rows == 1
+    assert report.issues["MISSING_VOLUME"] == 1

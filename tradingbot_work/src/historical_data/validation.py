@@ -82,19 +82,23 @@ def validate_candles(
         report.duplicates_removed = int(dup.sum())
         data = data[~dup]
 
+    times = data["timestamp"].dt.time
+    outside = (times < session_start) | (times >= session_end)
+    report.outside_session_rows = int(outside.sum())
+    # Exclude out-of-session rows before price checks so they cannot inflate
+    # rejected-row counts or contaminate issue metrics.
+    data = data[~outside].copy()
+
     checks = {
         "NON_POSITIVE_PRICE": (data[["open", "high", "low", "close"]] <= 0).any(axis=1),
         "INVALID_OHLC": (data["high"] < data[["open", "close", "low"]].max(axis=1))
         | (data["low"] > data[["open", "close", "high"]].min(axis=1)),
         "NEGATIVE_VOLUME": data["volume"] < 0,
         "MISSING_PRICE": data[["open", "high", "low", "close"]].isna().any(axis=1),
+        "MISSING_VOLUME": data["volume"].isna(),
     }
     if "open_interest" in data:
         checks["NEGATIVE_OPEN_INTEREST"] = data["open_interest"].fillna(0) < 0
-    times = data["timestamp"].dt.time
-    outside = (times < session_start) | (times >= session_end)
-    report.outside_session_rows = int(outside.sum())
-    data = data[~outside]
     if expiry is not None:
         checks["AFTER_EXPIRY"] = data["timestamp"].dt.date > expiry
     bad = pd.Series(False, index=data.index)
