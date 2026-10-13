@@ -14,12 +14,41 @@ def ema(s: pd.Series, n: int) -> pd.Series:
     return s.ewm(span=n, adjust=False, min_periods=n).mean()
 
 
+def rma(s: pd.Series, n: int) -> pd.Series:
+    """Wilder's RMA, seeded with the SMA of the first n valid observations.
+
+    This matches the initialization used by TradingView's ta.rma(), which is
+    used internally by ta.rsi() and ta.atr(). The prior EWM implementation
+    used the first observation as its recursive seed and could diverge during
+    indicator warm-up.
+    """
+    values = s.astype(float)
+    seed = values.rolling(window=n, min_periods=n).mean()
+    out = pd.Series(np.nan, index=values.index, dtype=float)
+    seed_positions = np.flatnonzero(seed.notna().to_numpy())
+    if len(seed_positions) == 0:
+        return out
+
+    start = int(seed_positions[0])
+    out.iloc[start] = float(seed.iloc[start])
+    previous = float(seed.iloc[start])
+    for i in range(start + 1, len(values)):
+        value = values.iloc[i]
+        if pd.isna(value):
+            # Wilder's RMA ignores missing source values.
+            out.iloc[i] = previous
+            continue
+        previous = (previous * (n - 1) + float(value)) / n
+        out.iloc[i] = previous
+    return out
+
+
 def rsi(s: pd.Series, n: int = 14) -> pd.Series:
     d = s.diff()
     gain = d.clip(lower=0)
     loss = -d.clip(upper=0)
-    ag = gain.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
-    al = loss.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+    ag = rma(gain, n)
+    al = rma(loss, n)
     rs = ag / al.replace(0, np.nan)
     out = 100 - 100 / (1 + rs)
     out = out.mask(al.eq(0) & ag.gt(0), 100)
@@ -37,7 +66,7 @@ def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
         ],
         axis=1,
     ).max(axis=1)
-    return tr.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+    return rma(tr, n)
 
 
 def load_data(path: Path) -> pd.DataFrame:
