@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 try:
@@ -143,8 +142,6 @@ def audit_symbol(
         "first_bar_ist": str(x["ts"].min()),
         "last_bar_ist": str(x["ts"].max()),
         "sessions": int(x["session"].nunique()),
-        "duplicate_timestamps_removed": int(len(df) - df["ts"].nunique()),
-        "missing_ohlc_volume_rows_removed": 0,
         "ohlc_invalid_rows": int(ohlc_invalid.sum()),
         "non_regular_session_bars": int((~((minute_of_day >= 555) & (minute_of_day < 930))).sum()),
         "sessions_not_75_bars": int((session_bars != 75).sum()),
@@ -208,5 +205,5 @@ def main() -> None:
     print("NOTE: This is Python-side candidate auditing, not proof of exact TradingView parity.")
 
 
-if __turn__ == "__main__":
+if __name__ == "__main__":
     main()
