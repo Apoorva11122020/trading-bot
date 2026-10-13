@@ -181,3 +181,56 @@ def test_oos_backtest_skips_risk_at_or_below_min_tick():
 
     assert trades.empty
     assert summary["trades"] == 0
+
+
+
+def _free_audit_sample(short_second_session: bool = False) -> pd.DataFrame:
+    from scripts.free_pine_parity_audit import audit_symbol
+
+    first_day = pd.date_range(
+        "2026-10-01 09:15", periods=75, freq="5min", tz="Asia/Kolkata"
+    )
+    second_day = pd.date_range(
+        "2026-10-02 09:15",
+        periods=12 if short_second_session else 75,
+        freq="5min",
+        tz="Asia/Kolkata",
+    )
+    timestamps = first_day.append(second_day)
+    closes = np.concatenate([
+        np.full(len(first_day), 100.0),
+        np.full(len(second_day), 101.0),
+    ])
+    return pd.DataFrame({
+        "ts": timestamps,
+        "open": closes,
+        "high": closes + 1.0,
+        "low": closes - 1.0,
+        "close": closes,
+        "volume": np.zeros(len(timestamps)),
+    })
+
+
+def test_free_pine_audit_zero_volume_filter_rejects_candidates():
+    from scripts.free_pine_parity_audit import audit_symbol
+
+    candles = _free_audit_sample()
+    candidates, summary = audit_symbol(
+        candles, "TEST", True, "15:00", atr_buffer=0.1, rr=1.5, min_tick=0.05
+    )
+    assert summary["volume_nonzero_bars"] == 0
+    assert summary["long_candidates_configured"] == 0
+    assert summary["short_candidates_configured"] == 0
+    assert candidates.empty
+
+
+def test_free_pine_audit_flags_short_historical_session():
+    from scripts.free_pine_parity_audit import audit_symbol
+
+    candles = _free_audit_sample(short_second_session=True)
+    _, summary = audit_symbol(
+        candles, "TEST", False, "15:00", atr_buffer=0.1, rr=1.5, min_tick=0.05
+    )
+    assert summary["sessions"] == 2
+    assert summary["sessions_not_75_bars"] == 1
+    assert "2026-10-02:12" in summary["short_sessions"]
