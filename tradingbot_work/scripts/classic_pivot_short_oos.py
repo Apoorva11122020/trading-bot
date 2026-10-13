@@ -122,15 +122,15 @@ def backtest(
     rr: float = 1.5,
 ) -> tuple[pd.DataFrame, dict]:
     # Indicators/signals are calculated on the full history to preserve warm-up.
-    # Only entries are restricted to the requested date window; positions are
-    # flattened at the end of the window so the test period cannot leak forward.
+    # Only entries are restricted to the requested date window; open trades are
+    # force-closed at the last available candle inside that window.
     x = prepare(df, volume_filter)
     start_ts = pd.Timestamp(start_date).date()
     end_ts = pd.Timestamp(end_date).date()
     x["in_test_window"] = x["ts"].dt.date.between(start_ts, end_ts)
+    minutes = x["ts"].dt.hour * 60 + x["ts"].dt.minute
     x["flat_window_end"] = (
-        x["ts"].dt.date.eq(end_ts)
-        & (x["ts"].dt.hour * 60 + x["ts"].dt.minute >= 15 * 60 + 15)
+        x["ts"].dt.date.eq(end_ts) & (minutes >= 15 * 60 + 15)
     )
 
     trades = []
@@ -149,12 +149,12 @@ def backtest(
             last_trade_exit_ts = prev["ts"]
             pos = None
 
+        # Process exits before considering a new entry on this candle.
         if pos is not None:
             exit_price = None
             reason = None
 
-            # SHORT position: a gap above stop must fill at the opening price.
-            # Target fills remain at target price (no assumed price improvement).
+            # Conservative OHLC assumption: stop wins if stop and target both hit.
             hit_stop = row["high"] >= pos["stop"]
             hit_target = row["low"] <= pos["target"]
 
@@ -164,12 +164,10 @@ def backtest(
                 exit_price, reason = pos["stop"], "stop"
             elif hit_target:
                 exit_price, reason = pos["target"], "target"
+            elif bool(row["flat_window_end"]):
+                exit_price, reason = float(row["close"]), "test_window_flat"
             elif bool(row["flat_time"]):
                 exit_price, reason = float(row["close"]), "intraday_flat"
-            elif row["ts"].date() == end_ts and (
-                row["ts"].hour * 60 + row["ts"].minute >= 15 * 60 + 15
-            ):
-                exit_price, reason = float(row["close"]), "test_window_flat"
 
             if exit_price is not None:
                 trades.append(
@@ -205,9 +203,10 @@ def backtest(
                         "volume_filter": volume_filter,
                     }
 
-    # Safety-close any open position at the last available candle within the window.
+    # Close at the last candle *within the requested end date*, never a later
+    # row outside the test window. This also covers datasets ending before 15:15.
     if pos is not None:
-        eligible = x[x["ts"].dt.date <= end_ts]
+        eligible = x.loc[x["ts"].dt.date.between(start_ts, end_ts)]
         if not eligible.empty:
             row = eligible.iloc[-1]
             trades.append(
@@ -319,4 +318,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
