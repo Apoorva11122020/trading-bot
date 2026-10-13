@@ -38,10 +38,11 @@ The Python research scripts use the same pivot formulas, EMA/RSI/ATR helper func
 
 1. **Volume defaults differ by experiment.** The Pine indicator and Pine Strategy appendix default `useVolume=true`. Since CSV volume is always zero, this filter rejects all signals (zero-volume bars cannot satisfy `volume > volAvg × 1.2`). The OOS Python experiment intentionally runs with the volume filter OFF. That is a different configuration, not default-settings parity.
 2. **The two Pine snippets use different session ends.** The alert indicator defaults to 15:15; the Strategy Tester appendix allows entries only before 15:00 and calls `strategy.close_all` during the 15:00 hour. The Python OOS script allows entries before 15:00 and uses its own test-window/intraday flat logic at/after 15:15. Do not compare trade lists as if these were identical settings.
-3. **Direction and position management differ.** The Python OOS script is SHORT_ONLY and permits one open position; the Pine Strategy appendix can take both long and short signals and can reverse positions. Its Strategy Tester trades cannot be expected to match the short-only report.
-4. **Costs/fills differ.** The Pine Strategy example sets 0.03% commission and 2 ticks of slippage. The OOS script's default costs are zero unless passed explicitly. Also, the report is in approximate spot-index points, not broker-accurate futures/options P&L.
-5. **Tick-size guard.** Pine validates risk against `syminfo.mintick`; Python currently accepts any positive risk. No short signal in the supplied sample had risk at or below 0.05 points under the 0.1 ATR stop-buffer formula, but the guard is still a small implementation difference and should be made instrument-configurable before claiming strict parity.
-6. **Stop/target sequencing.** Python conservatively counts a stop before a target when both are touched in the same 5-minute candle. Pine Strategy Tester intrabar fill assumptions may differ; exact trade parity requires matching TradingView strategy properties and broker emulator settings.
+3. **Session close is now aligned for the OOS research script.** The Python OOS script has been changed to flatten at/after 15:00 IST, matching the Strategy appendix's close-all trigger on the 15:00 bar. The alert-only indicator still has its own 15:15 signal-session default.
+4. **Direction and position management differ.** The Python OOS script is SHORT_ONLY and permits one open position; the Pine Strategy appendix can take both long and short signals and can reverse positions. Its Strategy Tester trades cannot be expected to match the short-only report.
+5. **Costs/fills differ.** The Pine Strategy example sets 0.03% commission and 2 ticks of slippage. The OOS script's default costs are zero unless passed explicitly. Also, the report is in approximate spot-index points, not broker-accurate futures/options P&L.
+6. **Tick-size guard.** Pine validates risk against `syminfo.mintick`; the Python OOS script now has a configurable `--min-tick` (default 0.05) and rejects risk at or below that value. No short signal in the supplied sample had risk at or below 0.05 points.
+7. **Stop/target sequencing.** Python conservatively counts a stop before a target when both are touched in the same 5-minute candle. Pine Strategy Tester intrabar fill assumptions may differ; exact trade parity requires matching TradingView strategy properties and broker emulator settings.
 
 ## Candidate signal counts (volume filter OFF)
 
@@ -56,7 +57,7 @@ With the Pine volume filter ON, the supplied zero-volume CSVs produce **zero qua
 
 ## OOS results interpretation
 
-The already-run short-only OOS test (2026-06-01 through 2026-10-08) was negative on both indices even before realistic transaction costs. This is a warning against live deployment, not a reason to tune parameters on the OOS dates.
+The OOS script has now been corrected to flatten at 15:00 IST and apply the Pine `syminfo.mintick` risk guard (default 0.05). With zero commission and zero slippage, the corrected short-only OOS run (2026-06-01 through 2026-10-08) produced NIFTY 50: 62 trades, −194.50 points, 37.10% wins, PF 0.795; BANK NIFTY: 68 trades, −756.32 points, 33.82% wins, PF 0.776. With 2 points of slippage per side and zero commission, results were NIFTY 50: −442.50 points (PF 0.599); BANK NIFTY: −1,028.32 points (PF 0.710). These are approximate spot-index points, not contract P&L. Both remain negative before brokerage/taxes, so do not deploy live.
 
 ## Next validation gate
 
