@@ -17,7 +17,7 @@ Run the NIFTY and BANK NIFTY downloads separately:
 
 ```powershell
 python scripts/download_pivot_futures.py --symbol NIFTY --spot-csv ..\data\NIFTY_50_5m_2025-10-01_to_2026-10-09.csv
-python scripts/download_pivot_futures.py --symbol BANKNIFTY --spot-csv ..\data\BANK_NIFTY_5m_2025-10-01_to-2026-10-09.csv
+python scripts/download_pivot_futures.py --symbol BANKNIFTY --spot-csv ..\data\BANK_NIFTY_5m_2025-10-01_to_2026-10-09.csv
 ```
 
 The actual source CSVs end on **2026-10-08**, so the default end date is 2026-10-08 even though the filenames say Oct 9. If your files are in another location, supply their real paths with `--spot-csv`.
@@ -26,7 +26,7 @@ Output is stored separately so the two underlying datasets cannot overwrite each
 - `data/historical/pivot_futures/nifty/futures/`
 - `data/historical/pivot_futures/banknifty/futures/`
 
-If the API/connection fails, retry with `--resume`. To validate an already-downloaded dataset without network calls, pass the same symbol and CSV with `--validate`. Check `futures/data_quality.json`: only a `PASS` dataset is suitable for the next research run. If it reports `FUTURES_VOLUME_UNAVAILABLE`, missing contracts, or alignment failures, stop rather than backtesting with the index volume.
+The futures validator recognizes the 2025-10-21 Muhurat session as 12 bars (13:45–14:45 IST), rather than falsely requiring 75 regular-session bars. To validate an already-downloaded dataset without network calls, pass the same symbol and CSV with `--validate`. Check `futures/data_quality.json`: only a `PASS` dataset is suitable for the next research run. If it reports `FUTURES_VOLUME_UNAVAILABLE`, missing contracts, or alignment failures, stop rather than backtesting with the index volume.
 
 ## Safety and interpretation
 
