@@ -39,3 +39,12 @@ def test_atr_uses_wilder_rma_seed():
     assert np.isnan(actual.iloc[0:2]).all()
     assert np.isclose(actual.iloc[2], 1.0)
     assert np.isclose(actual.iloc[3], 1.0)
+
+
+def test_ema_matches_recursive_pine_initialization():
+    values = pd.Series([10.0, 12.0, 14.0, 16.0])
+    actual = __import__("scripts.classic_pivot_short_oos", fromlist=["ema"]).ema(values, 3)
+
+    # alpha = 2 / (length + 1) = 0.5; Pine EMA starts from first source value.
+    expected = [10.0, 11.0, 12.5, 14.25]
+    assert np.allclose(actual.to_numpy(), expected)

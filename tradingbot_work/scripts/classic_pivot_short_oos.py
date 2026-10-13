@@ -11,7 +11,8 @@ DEFAULT_OUT = Path("reports/pivot_short_oos")
 
 
 def ema(s: pd.Series, n: int) -> pd.Series:
-    return s.ewm(span=n, adjust=False, min_periods=n).mean()
+    """TradingView ta.ema-style recursive EMA, seeded from the first value."""
+    return s.ewm(span=n, adjust=False).mean()
 
 
 def rma(s: pd.Series, n: int) -> pd.Series:
