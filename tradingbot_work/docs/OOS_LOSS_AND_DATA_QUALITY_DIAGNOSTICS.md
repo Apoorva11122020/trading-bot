@@ -63,6 +63,17 @@ These cohorts are small and were inspected after seeing the OOS results. They ar
 
 NIFTY's total loss is spread across June–August and early October, offset by a profitable September. BANK NIFTY's total loss is heavily concentrated in September. That instability argues against declaring a reliable edge from this sample.
 
+## Directionality cross-check (exploratory, zero costs)
+
+To test whether the short-only direction alone explains the result, I also ran a two-sided research variant using the same pivot/EMA/RSI/cross filters, 1.5R target, 0.1 ATR stop buffer, one position at a time, and 15:00 flat rule. This is a local diagnostic simulation, not a TradingView parity claim.
+
+| Instrument | Trades | Net points | Win rate | PF | Long trades / net | Short trades / net |
+|---|---:|---:|---:|---:|---:|---:|
+| NIFTY 50 | 109 | -134.07 | 39.45% | 0.906 | 48 / +51.71 | 61 / -185.78 |
+| BANK NIFTY | 117 | -1,037.77 | 35.90% | 0.815 | 49 / -281.45 | 68 / -756.32 |
+
+The long side improves NIFTY versus short-only but does not make the combined variant profitable. BANK NIFTY's long side also loses, and adding it worsens the total. This supports the conclusion that the current rule set has no demonstrated OOS edge in this dataset; it does **not** justify tuning filters on this same OOS window.
+
 ## Configuration mismatch / deployment gate
 
 - Pine defaults the volume filter ON; the supplied data has all-zero volume, so that setting yields no qualifying signals. The OOS report intentionally used volume OFF. This is a research variant, not default-settings parity.
