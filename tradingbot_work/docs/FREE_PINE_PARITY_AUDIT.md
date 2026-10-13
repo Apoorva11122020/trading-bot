@@ -31,7 +31,7 @@ The default session end is 15:00 IST for the Strategy appendix. Use `--session-e
 | Candidate longs, volume ON | 0 | 0 |
 | Candidate shorts, volume ON | 0 | 0 |
 
-The CSV filenames say they run through 2026-10-09, but their last candle is 2026-10-08 at 15:25 IST. The session on 2025-10-21 has only 12 candles in each file; investigate this short session before treating the data as complete. Other regular sessions in this sample have 75 five-minute candles.
+The CSV filenames say they run through 2026-10-09, but their last candle is 2026-10-08 at 15:25 IST. The 12 candles on 2025-10-21 (13:45–14:40 IST candle timestamps) match the NSE Diwali Muhurat session, scheduled for 13:45–14:45 IST; this is an expected special one-hour session, not missing morning data. See the [NSE F&O circular](https://www.smifs.com/files/downloads/638950074544632565_Muhurat%20Trading%20session%20on%20account%20of%20Diwali.pdf) or [Upstox schedule](https://upstox.com/announcements/special-trading/muhurat-trading-2025-tuesday-21-october-145-pm-245-pm/). Do not apply a normal 75-candle completeness rule to this special session.
 
 ## Exact parity limitation
 
