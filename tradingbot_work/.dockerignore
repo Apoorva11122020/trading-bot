@@ -1,0 +1,25 @@
+# Secrets must never enter the image; supply them at runtime via env_file.
+.env
+.env.*
+!.env.example
+
+# Local runtime state
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+
+# Tooling / caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.git/
+.gitignore
+.cursor/
+.vscode/
+.idea/

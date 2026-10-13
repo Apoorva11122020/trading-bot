@@ -1,0 +1,72 @@
+//@version=6
+indicator("Nifty & Bank Nifty Classic Pivot Signals (Alerts Only)", overlay=true, max_labels_count=500)
+
+// Alerts only. No broker orders are sent by this indicator.
+groupFilters = "Signal Filters"
+useTrend = input.bool(true, "Require EMA 20/50 trend", group=groupFilters)
+useRSI = input.bool(true, "Require RSI confirmation", group=groupFilters)
+useVolume = input.bool(true, "Require volume confirmation", group=groupFilters)
+rsiLength = input.int(14, "RSI Length", minval=2, group=groupFilters)
+rsiBullMin = input.float(55.0, "Bullish RSI threshold", step=0.5, group=groupFilters)
+rsiBearMax = input.float(45.0, "Bearish RSI threshold", step=0.5, group=groupFilters)
+volLength = input.int(20, "Volume average length", minval=2, group=groupFilters)
+volFactor = input.float(1.2, "Volume multiplier", minval=0.1, step=0.1, group=groupFilters)
+atrLength = input.int(14, "ATR Length", minval=2)
+atrBuffer = input.float(0.1, "Stop buffer (ATR multiple)", minval=0.0, step=0.05)
+rr = input.float(1.5, "Reward / risk target", minval=0.5, step=0.25)
+startHour = input.int(9, "Session start hour", minval=0, maxval=23)
+startMinute = input.int(20, "Session start minute", minval=0, maxval=59)
+endHour = input.int(15, "Session end hour", minval=0, maxval=23)
+endMinute = input.int(15, "Session end minute", minval=0, maxval=59)
+
+// Prior completed daily candle only: high[1], low[1], close[1].
+[prevHigh, prevLow, prevClose] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+pp = (prevHigh + prevLow + prevClose) / 3.0
+r1 = 2.0 * pp - prevLow
+s1 = 2.0 * pp - prevHigh
+r2 = pp + (prevHigh - prevLow)
+s2 = pp - (prevHigh - prevLow)
+
+ema20 = ta.ema(close, 20)
+ema50 = ta.ema(close, 50)
+rsiValue = ta.rsi(close, rsiLength)
+volAvg = ta.sma(volume, volLength)
+atr = ta.atr(atrLength)
+hasVolume = not na(volume) and not na(volAvg) and volAvg > 0
+volumeOK = not useVolume or (hasVolume and volume > volAvg * volFactor)
+bullTrend = not useTrend or ema20 > ema50
+bearTrend = not useTrend or ema20 < ema50
+bullRSI = not useRSI or rsiValue > rsiBullMin
+bearRSI = not useRSI or rsiValue < rsiBearMax
+
+sessionStart = timestamp(syminfo.timezone, year, month, dayofmonth, startHour, startMinute)
+sessionEnd = timestamp(syminfo.timezone, year, month, dayofmonth, endHour, endMinute)
+inSession = time >= sessionStart and time < sessionEnd
+crossUp = ta.crossover(close, pp) or ta.crossover(close, r1)
+crossDown = ta.crossunder(close, pp) or ta.crossunder(close, s1)
+
+longSL = low - atr * atrBuffer
+longRisk = close - longSL
+longTarget = close + longRisk * rr
+shortSL = high + atr * atrBuffer
+shortRisk = shortSL - close
+shortTarget = close - shortRisk * rr
+validLong = barstate.isconfirmed and inSession and crossUp and volumeOK and bullRSI and bullTrend and longRisk > syminfo.mintick
+validShort = barstate.isconfirmed and inSession and crossDown and volumeOK and bearRSI and bearTrend and shortRisk > syminfo.mintick
+
+plot(pp, "Pivot PP", color=color.yellow, linewidth=2)
+plot(r1, "Resistance R1", color=color.new(color.green, 10))
+plot(s1, "Support S1", color=color.new(color.red, 10))
+plot(r2, "Resistance R2", color=color.new(color.green, 55))
+plot(s2, "Support S2", color=color.new(color.red, 55))
+plot(ema20, "EMA 20", color=color.aqua)
+plot(ema50, "EMA 50", color=color.orange)
+plotshape(validLong, title="Bullish Signal", style=shape.labelup, location=location.belowbar, color=color.green, text="BUY", textcolor=color.white, size=size.tiny)
+plotshape(validShort, title="Bearish Signal", style=shape.labeldown, location=location.abovebar, color=color.red, text="SELL", textcolor=color.white, size=size.tiny)
+
+alertcondition(validLong, title="Bullish Pivot Signal", message="Bullish Pivot signal confirmed. Use Any alert() function call for dynamic entry, SL and target.")
+alertcondition(validShort, title="Bearish Pivot Signal", message="Bearish Pivot signal confirmed. Use Any alert() function call for dynamic entry, SL and target.")
+if validLong
+    alert("BULLISH | " + syminfo.ticker + " | TF: " + timeframe.period + " | Entry: " + str.tostring(close, format.mintick) + " | SL: " + str.tostring(longSL, format.mintick) + " | Target: " + str.tostring(longTarget, format.mintick) + " | PP: " + str.tostring(pp, format.mintick) + " | R1: " + str.tostring(r1, format.mintick), alert.freq_once_per_bar_close)
+if validShort
+    alert("BEARISH | " + syminfo.ticker + " | TF: " + timeframe.period + " | Entry: " + str.tostring(close, format.mintick) + " | SL: " + str.tostring(shortSL, format.mintick) + " | Target: " + str.tostring(shortTarget, format.mintick) + " | PP: " + str.tostring(pp, format.mintick) + " | S1: " + str.tostring(s1, format.mintick), alert.freq_once_per_bar_close)

@@ -1,0 +1,74 @@
+//@version=6
+strategy("Nifty & Bank Nifty Classic Pivot Algo — Backtest", overlay=true, pyramiding=0, initial_capital=200000, commission_type=strategy.commission.percent, commission_value=0.03, slippage=2, process_orders_on_close=true)
+
+// TradingView Strategy Tester simulation only; no live broker execution.
+// Apply separately to Nifty and Bank Nifty and use a consistent spot/futures basis.
+useTrend = input.bool(true, "Use EMA 20/50 filter")
+useRSI = input.bool(true, "Use RSI filter")
+useVolume = input.bool(true, "Use volume filter")
+volMultiplier = input.float(1.2, "Volume multiplier", minval=0.1)
+rr = input.float(1.5, "Reward / risk", minval=0.5, step=0.25)
+atrBuffer = input.float(0.1, "ATR stop buffer", minval=0.0, step=0.05)
+riskPct = input.float(1.0, "Equity risk per trade (%)", minval=0.1, maxval=5.0, step=0.1)
+maxQty = input.int(1, "Maximum units/contracts", minval=1)
+startHour = input.int(9, "Entry start hour", minval=0, maxval=23)
+startMinute = input.int(20, "Entry start minute", minval=0, maxval=59)
+endHour = input.int(15, "Entry cutoff hour", minval=0, maxval=23)
+endMinute = input.int(0, "Entry cutoff minute", minval=0, maxval=59)
+forceFlat = input.bool(true, "Close positions at/after 15:15")
+flatHour = input.int(15, "Force-flat hour", minval=0, maxval=23)
+flatMinute = input.int(15, "Force-flat minute", minval=0, maxval=59)
+
+[ph, pl, pc] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+pp = (ph + pl + pc) / 3.0
+r1 = 2.0 * pp - pl
+s1 = 2.0 * pp - ph
+r2 = pp + (ph - pl)
+s2 = pp - (ph - pl)
+ema20 = ta.ema(close, 20)
+ema50 = ta.ema(close, 50)
+rsiVal = ta.rsi(close, 14)
+atr = ta.atr(14)
+volAvg = ta.sma(volume, 20)
+hasVolume = not na(volume) and not na(volAvg) and volAvg > 0
+volumeOK = not useVolume or (hasVolume and volume > volAvg * volMultiplier)
+bullOK = (not useTrend or ema20 > ema50) and (not useRSI or rsiVal > 55) and volumeOK
+bearOK = (not useTrend or ema20 < ema50) and (not useRSI or rsiVal < 45) and volumeOK
+startTime = timestamp(syminfo.timezone, year, month, dayofmonth, startHour, startMinute)
+endTime = timestamp(syminfo.timezone, year, month, dayofmonth, endHour, endMinute)
+flatTime = timestamp(syminfo.timezone, year, month, dayofmonth, flatHour, flatMinute)
+inSession = time >= startTime and time < endTime
+up = ta.crossover(close, pp) or ta.crossover(close, r1)
+down = ta.crossunder(close, pp) or ta.crossunder(close, s1)
+longSignal = barstate.isconfirmed and inSession and up and bullOK
+shortSignal = barstate.isconfirmed and inSession and down and bearOK
+longStop = low - atr * atrBuffer
+longRisk = close - longStop
+longTarget = close + longRisk * rr
+shortStop = high + atr * atrBuffer
+shortRisk = shortStop - close
+shortTarget = close - shortRisk * rr
+
+// Approximate risk-based quantity. Verify point value and contract units for the chosen symbol.
+riskCash = strategy.equity * riskPct / 100.0
+longUnitRisk = longRisk * syminfo.pointvalue
+shortUnitRisk = shortRisk * syminfo.pointvalue
+longQty = longUnitRisk > 0 ? math.max(1, math.min(maxQty, math.floor(riskCash / longUnitRisk))) : 0
+shortQty = shortUnitRisk > 0 ? math.max(1, math.min(maxQty, math.floor(riskCash / shortUnitRisk))) : 0
+
+if longSignal and strategy.position_size <= 0 and longRisk > syminfo.mintick and longQty > 0
+    strategy.entry("Long", strategy.long, qty=longQty)
+    strategy.exit("Long Exit", from_entry="Long", stop=longStop, limit=longTarget)
+if shortSignal and strategy.position_size >= 0 and shortRisk > syminfo.mintick and shortQty > 0
+    strategy.entry("Short", strategy.short, qty=shortQty)
+    strategy.exit("Short Exit", from_entry="Short", stop=shortStop, limit=shortTarget)
+if forceFlat and time >= flatTime and (na(time[1]) or time[1] < flatTime)
+    strategy.close_all(comment="Intraday session close")
+
+plot(pp, "Pivot PP", color=color.yellow, linewidth=2)
+plot(r1, "R1", color=color.green)
+plot(s1, "S1", color=color.red)
+plot(r2, "R2", color=color.new(color.green, 55))
+plot(s2, "S2", color=color.new(color.red, 55))
+plot(ema20, "EMA 20", color=color.aqua)
+plot(ema50, "EMA 50", color=color.orange)

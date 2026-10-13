@@ -1,0 +1,109 @@
+research:
+  underlyings: ["NIFTY", "BANKNIFTY"]
+  timeframe: "5m"
+  interval_minutes: 5
+  data_source_label: "Upstox Historical Data"
+
+  session:
+    timezone: "Asia/Kolkata"
+    market_open: "09:15"
+    allow_entries_from: "09:15"
+    stop_new_entries: "14:30"
+    square_off: "15:15"
+    market_close: "15:30"
+
+  risk:
+    initial_equity: 1000000
+    max_daily_loss_inr: 3000
+    risk_per_trade_percent: 0.5
+    max_open_positions: 1
+    max_trades_per_day: 6
+    max_portfolio_exposure_percent: 50
+    max_premium_exposure_pct: 10
+    max_option_positions: 1
+
+  option_mapping:
+    expiry_mode: "nearest"
+    strike_mode: "ATM"
+    strike_offset: 0
+    entry_timing: "next_open"   # next_open | signal_close
+
+  exit:
+    stop_loss:
+      type: "atr"
+      multiplier: 1.5
+    target:
+      risk_reward: 2.0
+    breakeven:
+      enabled: true
+      activation_r: 1.0
+    trailing_stop:
+      enabled: true
+      atr_multiplier: 1.0
+
+  costs:
+    label: "Costs excluded"
+    brokerage_per_order: 0
+    stt_percent: 0
+    exchange_charges_percent: 0
+    gst_percent: 0
+    stamp_duty_percent: 0
+    slippage_bps: 0
+
+  split:
+    train: 0.70
+    validation: 0.15
+    out_of_sample: 0.15
+
+  ranking:
+    - profit_factor
+    - max_drawdown
+    - win_rate
+    - average_r
+
+  strategies:
+    S1:
+      name: "EMA VWAP RSI Breakout Volume"
+      enabled: true
+      indicators:
+        ema_fast: 20
+        ema_slow: 50
+        rsi_period: 14
+        atr_period: 14
+        volume_sma_period: 20
+        breakout_period: 20
+      long:
+        rsi_min: 55
+        volume_multiplier: 1.2
+      short:
+        rsi_max: 45
+        volume_multiplier: 1.2
+
+    S2:
+      name: "Opening Range Breakout"
+      enabled: true
+      range_start: "09:15"
+      range_end: "09:30"
+      atr_period: 14
+
+    S3:
+      name: "VWAP Momentum Breakout"
+      enabled: true
+      rsi_period: 14
+      atr_period: 14
+      breakout_period: 10
+      long_rsi_min: 52
+      short_rsi_max: 48
+
+    S4:
+      name: "EMA Supertrend VWAP"
+      enabled: true
+      ema_fast: 20
+      ema_slow: 50
+      atr_period: 10
+      supertrend_multiplier: 3.0
+
+  download:
+    strike_window: 4
+    include_futures: true
+    include_options: true

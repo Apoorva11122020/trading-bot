@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+logs/*.log
+
+# Runtime data and secrets
+data/
+logs/*.jsonl
+*.db
+*.db-wal
+*.db-shm
+*.sqlite

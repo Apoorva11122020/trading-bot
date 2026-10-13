@@ -1,0 +1,24 @@
+services:
+  trading-bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DASHBOARD_API_AUTH_REQUIRED: ${DASHBOARD_API_AUTH_REQUIRED:-false}
+      DASHBOARD_API_KEY: ${DASHBOARD_API_KEY:-}
+      TRADING_MODE: ${TRADING_MODE:-PAPER}
+      LIVE_TRADING_ENABLED: ${LIVE_TRADING_ENABLED:-false}
+      DATABASE_PATH: ${DATABASE_PATH:-data/trading.db}
+    ports:
+      # Localhost only; put an authenticated reverse proxy in front for remote access.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -1,0 +1,111 @@
+strategy:
+  name: "Intraday Trend Momentum Breakout"
+  exchange: "NSE"
+  market: "EQUITY"
+  timeframe: "5m"
+  instruments:
+    universe: "NIFTY50"
+
+  indicators:
+    ema_fast: 20
+    ema_slow: 50
+    rsi_period: 14
+    atr_period: 14
+    volume_sma_period: 20
+    breakout_period: 20
+    vwap_enabled: true
+
+  entry:
+    long:
+      enabled: true
+      ema_fast_above_slow: true
+      price_above_vwap: true
+      rsi_min: 55
+      breakout: "previous_20_high"
+      volume_multiplier: 1.2
+    short:
+      enabled: true
+      ema_fast_below_slow: true
+      price_below_vwap: true
+      rsi_max: 45
+      breakout: "previous_20_low"
+      volume_multiplier: 1.2
+
+  exit:
+    stop_loss:
+      type: "atr"
+      multiplier: 1.5
+    target:
+      risk_reward: 2.0
+    breakeven:
+      enabled: true
+      activation_r: 1.0
+    trailing_stop:
+      enabled: true
+      atr_multiplier: 1.0
+    force_exit_time: "15:15"
+
+risk:
+  risk_per_trade_percent: 0.5
+  max_open_positions: 3
+  max_trades_per_day: 6
+  max_daily_loss_inr: 3000
+  max_daily_loss_percent: 2.0
+  max_portfolio_exposure_percent: 50.0
+  max_loss_gap_buffer_percent: 10.0
+
+session:
+  timezone: "Asia/Kolkata"
+  market_open: "09:15"
+  allow_entries_from: "09:30"
+  stop_new_entries: "14:45"
+  force_exit: "15:15"
+  market_close: "15:30"
+
+execution:
+  max_slippage_percent: 0.10
+  stale_data_seconds: 3
+  duplicate_order_protection: true
+  # Operational order-status polling (not strategy parameters).
+  order_poll_interval_seconds: 2
+  order_poll_max_backoff_seconds: 30
+  order_status_timeout_seconds: 120
+
+system:
+  trading_mode: "PAPER"
+  live_trading_enabled: false
+
+# Option trading (BUY-side CE/PE only). Equity sections above are unchanged;
+# the equity trailing multiplier remains exit.trailing_stop.atr_multiplier.
+options:
+  enabled: true
+  signal_source: "underlying"      # underlying | option
+  market_type: "stock_option"      # index_option | stock_option
+  underlying: "RELIANCE"
+  expiry:
+    mode: "nearest"                # nearest | next | date (date: YYYY-MM-DD)
+  strike:
+    mode: "ATM"                    # ATM | ITM | OTM | EXACT
+    offset: 0                      # strike steps away from ATM
+  option_type:
+    mode: "signal_based"           # signal_based | CE | PE
+  risk:
+    max_premium_exposure_pct: 10
+    max_option_positions: 2
+    stop_mode: "premium_atr"       # premium_atr | underlying_atr
+    stop_atr_multiplier: 1.5
+    underlying_delta: 0.5
+    target_r: 2.0
+    breakeven_r: 1.0
+    trailing_atr_multiplier: 1.0
+  execution:
+    product: "D"
+    order_type: "MARKET"
+  lot_size_required: true
+  index_underlyings: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+  stock_underlyings: ["RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "SBIN", "AXISBANK", "KOTAKBANK", "LT", "ITC"]
+  instrument_data:
+    source: "upstox_instrument_master"
+    url: "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
+    cache_dir: "data/cache/instruments"
+    cache_hours: 12

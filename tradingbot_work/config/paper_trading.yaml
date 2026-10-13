@@ -1,0 +1,17 @@
+paper_trading:
+  strategy_id: S2
+  underlying: NIFTY
+  timeframe: 5m
+  interval_minutes: 5
+  instrument_key: "NSE_INDEX|Nifty 50"
+  initial_equity: 1000000
+  stale_data_seconds: 15
+  history_candles: 250
+  session:
+    timezone: Asia/Kolkata
+    market_open: "09:15"
+    allow_entries_from: "09:15"
+    stop_new_entries: "14:30"
+    square_off: "15:15"
+    market_close: "15:30"
+  reports_dir: reports/paper_trading

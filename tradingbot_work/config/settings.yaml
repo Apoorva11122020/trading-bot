@@ -1,0 +1,11 @@
+application:
+  name: "automated-indian-trading-bot"
+  environment: "development"
+  timezone: "Asia/Kolkata"
+
+logging:
+  level: "INFO"
+
+trading:
+  mode: "PAPER"
+  live_trading_enabled: false

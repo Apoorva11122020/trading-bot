@@ -1,0 +1,12 @@
+market_data:
+  provider: "PAPER"
+  feed_mode: "TICK"
+  candle_interval_minutes: 5
+  stale_after_seconds: 15
+  reconnect:
+    enabled: true
+    initial_delay_seconds: 1
+    max_delay_seconds: 30
+    max_attempts: 10
+  trading_block_on_stale: true
+  trading_block_on_disconnect: true
