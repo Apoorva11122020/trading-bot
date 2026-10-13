@@ -13,7 +13,7 @@ on:
       - ".github/workflows/pivot-indicator-tests.yml"
   push:
     branches:
-      - "audit/pine-indicator-parity"
+      - "audit/**"
 
 jobs:
   focused-tests:
