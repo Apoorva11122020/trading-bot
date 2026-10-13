@@ -85,13 +85,13 @@ def test_oos_backtest_force_closes_at_last_candle_in_window():
     timestamps = timestamps.append(pd.DatetimeIndex([
         pd.Timestamp("2026-06-03 09:15", tz="Asia/Kolkata")
     ]))
-    closes = np.linspace(100.0, 90.0, len(timestamps))
+    closes = np.full(len(timestamps), 100.0)
     frame = pd.DataFrame({
         "ts": timestamps,
         "session": timestamps.date,
         "open": closes,
-        "high": closes + 0.5,
-        "low": closes - 0.5,
+        "high": closes + 0.1,
+        "low": closes - 0.1,
         "close": closes,
         "volume": 1.0,
     })
@@ -122,6 +122,7 @@ def test_oos_backtest_force_closes_at_last_candle_in_window():
         monkeypatch.undo()
 
     assert len(trades) == 1
+    assert pd.Timestamp(trades.iloc[0]["exit_ts"]) == timestamps[13]
     assert pd.Timestamp(trades.iloc[0]["exit_ts"]).date() == pd.Timestamp("2026-06-01").date()
 
 
