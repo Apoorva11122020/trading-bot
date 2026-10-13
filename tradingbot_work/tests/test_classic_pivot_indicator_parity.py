@@ -123,3 +123,22 @@ def test_oos_backtest_force_closes_at_last_candle_in_window():
 
     assert len(trades) == 1
     assert pd.Timestamp(trades.iloc[0]["exit_ts"]).date() == pd.Timestamp("2026-06-01").date()
+
+
+def test_oos_strategy_flat_time_matches_pine_strategy_1500_close():
+    timestamps = pd.to_datetime([
+        "2026-10-01 14:55:00+05:30",
+        "2026-10-01 15:00:00+05:30",
+        "2026-10-01 15:15:00+05:30",
+    ])
+    candles = pd.DataFrame({
+        "ts": timestamps,
+        "session": timestamps.date,
+        "open": [100.0, 100.0, 100.0],
+        "high": [101.0, 101.0, 101.0],
+        "low": [99.0, 99.0, 99.0],
+        "close": [100.0, 100.0, 100.0],
+        "volume": [0.0, 0.0, 0.0],
+    })
+    prepared = oos_backtest.prepare(candles, volume_filter=False)
+    assert prepared["flat_time"].tolist() == [False, True, True]
