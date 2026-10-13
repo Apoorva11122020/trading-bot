@@ -35,7 +35,11 @@ def load_data(path: Path) -> pd.DataFrame:
 def prepare(df: pd.DataFrame, volume_filter: bool) -> pd.DataFrame:
     x = df.copy()
     # Daily H/L/C from this dataset; shift by one full session to avoid lookahead.
-    daily = x.groupby("session", sort=True).agg(
+    # Use regular NSE session candles only when deriving daily pivot levels.
+    # Out-of-session rows must not affect the prior-day H/L/C used by Pine.
+    minutes = x["ts"].dt.hour * 60 + x["ts"].dt.minute
+    regular = x.loc[(minutes >= 9 * 60 + 15) & (minutes < 15 * 60 + 30)]
+    daily = regular.groupby("session", sort=True).agg(
         day_high=("high", "max"), day_low=("low", "min"), day_close=("close", "last")
     )
     daily["prev_high"] = daily["day_high"].shift(1)
