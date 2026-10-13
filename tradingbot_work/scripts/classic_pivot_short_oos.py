@@ -10,64 +10,10 @@ DEFAULT_DATA = Path("data/historical/upstox_pivot_5m")
 DEFAULT_OUT = Path("reports/pivot_short_oos")
 
 
-def ema(s: pd.Series, n: int) -> pd.Series:
-    """TradingView ta.ema-style recursive EMA, seeded from the first value."""
-    return s.ewm(span=n, adjust=False).mean()
-
-
-def rma(s: pd.Series, n: int) -> pd.Series:
-    """Wilder's RMA, seeded with the SMA of the first n valid observations.
-
-    This matches the initialization used by TradingView's ta.rma(), which is
-    used internally by ta.rsi() and ta.atr(). The prior EWM implementation
-    used the first observation as its recursive seed and could diverge during
-    indicator warm-up.
-    """
-    values = s.astype(float)
-    seed = values.rolling(window=n, min_periods=n).mean()
-    out = pd.Series(np.nan, index=values.index, dtype=float)
-    seed_positions = np.flatnonzero(seed.notna().to_numpy())
-    if len(seed_positions) == 0:
-        return out
-
-    start = int(seed_positions[0])
-    out.iloc[start] = float(seed.iloc[start])
-    previous = float(seed.iloc[start])
-    for i in range(start + 1, len(values)):
-        value = values.iloc[i]
-        if pd.isna(value):
-            # Wilder's RMA ignores missing source values.
-            out.iloc[i] = previous
-            continue
-        previous = (previous * (n - 1) + float(value)) / n
-        out.iloc[i] = previous
-    return out
-
-
-def rsi(s: pd.Series, n: int = 14) -> pd.Series:
-    d = s.diff()
-    gain = d.clip(lower=0)
-    loss = -d.clip(upper=0)
-    ag = rma(gain, n)
-    al = rma(loss, n)
-    rs = ag / al.replace(0, np.nan)
-    out = 100 - 100 / (1 + rs)
-    out = out.mask(al.eq(0) & ag.gt(0), 100)
-    out = out.mask(ag.eq(0) & al.gt(0), 0)
-    return out
-
-
-def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
-    pc = df["close"].shift(1)
-    tr = pd.concat(
-        [
-            df["high"] - df["low"],
-            (df["high"] - pc).abs(),
-            (df["low"] - pc).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-    return rma(tr, n)
+try:
+    from scripts.pivot_indicators import atr, ema, rma, rsi
+except ModuleNotFoundError:  # Support direct execution as python scripts/<file>.py
+    from pivot_indicators import atr, ema, rma, rsi
 
 
 def load_data(path: Path) -> pd.DataFrame:
