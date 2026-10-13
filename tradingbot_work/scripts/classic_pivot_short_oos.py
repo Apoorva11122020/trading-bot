@@ -36,7 +36,12 @@ def load_data(path: Path) -> pd.DataFrame:
 
 def prepare(df: pd.DataFrame, volume_filter: bool) -> pd.DataFrame:
     x = df.copy()
-    daily = x.groupby("session", sort=True).agg(
+    # Build daily H/L/C from regular NSE cash-session candles only.
+    # This prevents any pre/post-session rows in a CSV from changing the
+    # previous-day pivots used by Pine's request.security(..., "D", ...).
+    minutes = x["ts"].dt.hour * 60 + x["ts"].dt.minute
+    regular = x.loc[(minutes >= 9 * 60 + 15) & (minutes < 15 * 60 + 30)]
+    daily = regular.groupby("session", sort=True).agg(
         day_high=("high", "max"),
         day_low=("low", "min"),
         day_close=("close", "last"),
