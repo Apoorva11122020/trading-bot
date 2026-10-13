@@ -26,15 +26,16 @@ def test_rsi_all_gains_and_all_losses_have_expected_limits():
 
 
 def test_atr_uses_wilder_rma_seed():
+    # Keep every previous close inside each candle's range so true range is 1.0
+    # on every bar (no overnight/gap component inflates the first RMA seed).
     candles = pd.DataFrame({
-        "high": [11.0, 12.0, 13.0, 14.0],
-        "low": [10.0, 11.0, 12.0, 13.0],
-        "close": [10.5, 11.5, 12.5, 13.5],
+        "high": [11.0, 11.0, 11.0, 11.0],
+        "low": [10.0, 10.0, 10.0, 10.0],
+        "close": [10.5, 10.5, 10.5, 10.5],
     })
 
     actual = atr(candles, 3)
 
-    # True range is 1.0 on each bar, so its SMA seed and RMA stay at 1.0.
     assert np.isnan(actual.iloc[0:2]).all()
     assert np.isclose(actual.iloc[2], 1.0)
     assert np.isclose(actual.iloc[3], 1.0)
