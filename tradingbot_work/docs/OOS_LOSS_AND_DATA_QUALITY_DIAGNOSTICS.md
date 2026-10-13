@@ -6,16 +6,16 @@
 
 ## Findings at a glance
 
-1. Both CSVs contain 18,837 rows and 252 dates, but only 251 sessions have 75 regular-session candles. **2025-10-21 contains only 12 candles, from 13:45 through 14:40 IST**. The other 63 candles expected from 09:15 to 15:25 are absent. This is a source-data gap, not evidence that the exchange had a 12-candle regular session.
+1. Both CSVs contain 18,837 rows and 252 dates. **2025-10-21 contains 12 candles, timestamped 13:45 through 14:40 IST**, matching the NSE Diwali Muhurat session scheduled for 13:45–14:45 IST. This is an expected special one-hour session, not a data gap. See the [NSE F&O circular](https://www.smifs.com/files/downloads/638950074544632565_Muhurat%20Trading%20session%20on%20account%20of%20Diwali.pdf) or [Upstox schedule](https://upstox.com/announcements/special-trading/muhurat-trading-2025-tuesday-21-october-145-pm-245-pm/).
 2. Both CSVs have zero volume and zero open interest on every row. They are not suitable for validating the Pine default volume filter or actual futures/options P&L.
-3. The short-only OOS backtest is negative even with zero costs. The partial October 2025 session is far before the June–October 2026 OOS window and does **not** explain the observed OOS losses.
+3. The short-only OOS backtest is negative even with zero costs. The October 2025 Muhurat session is far before the June–October 2026 OOS window and does **not** explain the observed OOS losses.
 4. The dominant loss mechanism is stop-outs, not intraday time exits. The entry-hour breakdown points to poor results in late-day shorts, but this is a diagnostic observation—not permission to optimize against the same OOS sample.
 
-## Data-quality fix
+## Session interpretation
 
-The shared `classic_pivots_from_intraday` helper now checks the source session has at least 75 regular-session candles and includes both 09:15 and 15:25 IST. If a prior session is incomplete, it leaves the next session's PP/R1/S1 as NaN instead of silently deriving pivots from partial H/L/C. That prevents a partial day's range from contaminating the following day's pivot levels. The historical CSV/parquet files were not modified or re-downloaded.
+The 12-candle session on 2025-10-21 is a valid special market session. The NSE scheduled Muhurat trading from 13:45 to 14:45 IST, which yields 12 five-minute candles when timestamps label candle starts. It must not be treated as a truncated normal trading day. No historical CSV/parquet files were modified or re-downloaded.
 
-For the supplied files, 2025-10-22's reconstructed pivots are now deliberately unavailable because 2025-10-21 is incomplete. This is safer than pretending the 12 available candles represent the full daily candle. It is still not identical to TradingView's full daily OHLC; use a verified daily source for exact parity.
+The standard-session audit still reports sessions with a candle count other than 75; that is a data-quality signal to interpret against the exchange calendar, not an automatic reason to discard a session. A future data validator should maintain a calendar of special sessions instead of blindly requiring 75 bars every day.
 
 ## OOS result (zero commission, zero slippage)
 
