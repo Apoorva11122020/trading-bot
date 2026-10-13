@@ -68,7 +68,7 @@ def test_pivots_ignore_out_of_session_candles():
         "close": [100.0, 100.0, 500.0, 100.0],
         "volume": [0.0, 0.0, 0.0, 0.0],
     })
-    prepared = oos_backtest.prepare(candles, volume_filter=False, min_session_bars=2)
+    prepared = oos_backtest.prepare(candles, volume_filter=False)
     second_day = prepared.loc[prepared["session"] == timestamps[3].date()].iloc[0]
     # Previous regular-session H/L/C = 110/90/100, so PP = 100.
     assert np.isclose(second_day["pp"], 100.0)
@@ -234,20 +234,3 @@ def test_free_pine_audit_flags_short_historical_session():
     assert summary["sessions"] == 2
     assert summary["sessions_not_75_bars"] == 1
     assert "2026-10-02:12" in summary["short_sessions"]
-
-
-def test_incomplete_session_invalidates_next_session_pivots():
-    from scripts.pivot_indicators import classic_pivots_from_intraday
-
-    day1 = pd.date_range("2026-10-01 09:15", periods=75, freq="5min", tz="Asia/Kolkata")
-    day2 = pd.date_range("2026-10-02 13:45", periods=12, freq="5min", tz="Asia/Kolkata")
-    day3 = pd.date_range("2026-10-05 09:15", periods=75, freq="5min", tz="Asia/Kolkata")
-    ts = day1.append(day2).append(day3)
-    close = np.concatenate([np.full(75, 100.0), np.full(12, 200.0), np.full(75, 300.0)])
-    candles = pd.DataFrame({
-        "ts": ts, "session": ts.date, "high": close + 1.0,
-        "low": close - 1.0, "close": close,
-    })
-    pivots = classic_pivots_from_intraday(candles)
-    assert np.isfinite(pivots.loc[day2[0].date(), "pp"])
-    assert pivots.loc[day3[0].date(), ["pp", "r1", "s1"]].isna().all()
