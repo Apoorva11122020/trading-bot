@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "tradingbot_work/scripts/classic_pivot_short_oos.py"
+      - "tradingbot_work/scripts/classic_pivot_historical_backtest.py"
+      - "tradingbot_work/scripts/classic_pivot_short_only.py"
+      - "tradingbot_work/scripts/pivot_indicators.py"
       - "tradingbot_work/tests/test_classic_pivot_indicator_parity.py"
       - ".github/workflows/pivot-indicator-tests.yml"
   push:
