@@ -30,4 +30,4 @@ jobs:
           cache-dependency-path: tradingbot_work/requirements.txt
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements.txt
-      - run: python -m pytest -q tests/test_classic_pivot_indicator_parity.py tests/test_historical_data.py
+      - run: python -m pytest -q
