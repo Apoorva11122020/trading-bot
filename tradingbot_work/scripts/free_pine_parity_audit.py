@@ -21,9 +21,9 @@ from pathlib import Path
 import pandas as pd
 
 try:
-    from scripts.pivot_indicators import atr, ema, rsi, classic_pivots_from_intraday
+    from scripts.pivot_indicators import atr, ema, rsi
 except ModuleNotFoundError:  # direct execution from scripts/
-    from pivot_indicators import atr, ema, rsi, classic_pivots_from_intraday
+    from pivot_indicators import atr, ema, rsi
 
 IST = "Asia/Kolkata"
 
@@ -49,13 +49,23 @@ def audit_symbol(
     atr_buffer: float,
     rr: float,
     min_tick: float,
-    min_session_bars: int = 75,
 ) -> tuple[pd.DataFrame, dict]:
     x = df.copy()
     x["session"] = x["ts"].dt.date
     minute_of_day = x["ts"].dt.hour * 60 + x["ts"].dt.minute
     regular = x.loc[(minute_of_day >= 9 * 60 + 15) & (minute_of_day < 15 * 60 + 30)]
-    x = x.join(classic_pivots_from_intraday(x, min_session_bars=min_session_bars), on="session")
+    daily = regular.groupby("session", sort=True).agg(
+        day_high=("high", "max"),
+        day_low=("low", "min"),
+        day_close=("close", "last"),
+    )
+    daily["prev_high"] = daily["day_high"].shift(1)
+    daily["prev_low"] = daily["day_low"].shift(1)
+    daily["prev_close"] = daily["day_close"].shift(1)
+    daily["pp"] = (daily["prev_high"] + daily["prev_low"] + daily["prev_close"]) / 3.0
+    daily["r1"] = 2.0 * daily["pp"] - daily["prev_low"]
+    daily["s1"] = 2.0 * daily["pp"] - daily["prev_high"]
+    x = x.join(daily[["pp", "r1", "s1"]], on="session")
 
     x["ema20"] = ema(x["close"], 20)
     x["ema50"] = ema(x["close"], 50)
