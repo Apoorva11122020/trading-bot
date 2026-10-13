@@ -10,7 +10,7 @@
 
 ## Historical CSV audit
 
-Both supplied files contain 18,837 rows and 252 distinct dates, from 2025-10-01 09:15 IST through 2026-10-08 15:25 IST. Although the filenames say `to_2026-10-09`, the final candle in each file is **2026-10-08 15:25 IST**.
+Both supplied files contain 18,837 rows and 252 distinct dates, from 2025-10-01 09:15 IST through 2026-10-08 15:25 IST. Although the filenames say `to_2026-10-09`, the final candle in each file is **2026-10-08 15:25 IST**. The 12 candles on 2025-10-21 are expected: NSE scheduled Diwali Muhurat trading from 13:45 to 14:45 IST ([NSE F&O circular](https://www.smifs.com/files/downloads/638950074544632565_Muhurat%20Trading%20session%20on%20account%20of%20Diwali.pdf)). Do not classify that special session as missing data merely because it has fewer than 75 candles.
 
 | Check | NIFTY 50 | BANK NIFTY |
 |---|---:|---:|
