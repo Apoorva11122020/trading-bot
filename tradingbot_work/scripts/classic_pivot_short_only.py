@@ -10,9 +10,9 @@ DEFAULT_OUT = Path("reports/pivot_research_backtest")
 
 
 try:
-    from scripts.pivot_indicators import atr, ema, rsi, classic_pivots_from_intraday
+    from scripts.pivot_indicators import atr, ema, rsi
 except ModuleNotFoundError:  # Support direct execution as python scripts/<file>.py
-    from pivot_indicators import atr, ema, rsi, classic_pivots_from_intraday
+    from pivot_indicators import atr, ema, rsi
 
 
 def load_data(path: Path) -> pd.DataFrame:
@@ -32,9 +32,23 @@ def load_data(path: Path) -> pd.DataFrame:
     return df
 
 
-def prepare(df: pd.DataFrame, volume_filter: bool, min_session_bars: int = 75) -> pd.DataFrame:
+def prepare(df: pd.DataFrame, volume_filter: bool) -> pd.DataFrame:
     x = df.copy()
-    x = x.join(classic_pivots_from_intraday(x, min_session_bars=min_session_bars), on="session")
+    # Daily H/L/C from this dataset; shift by one full session to avoid lookahead.
+    # Use regular NSE session candles only when deriving daily pivot levels.
+    # Out-of-session rows must not affect the prior-day H/L/C used by Pine.
+    minutes = x["ts"].dt.hour * 60 + x["ts"].dt.minute
+    regular = x.loc[(minutes >= 9 * 60 + 15) & (minutes < 15 * 60 + 30)]
+    daily = regular.groupby("session", sort=True).agg(
+        day_high=("high", "max"), day_low=("low", "min"), day_close=("close", "last")
+    )
+    daily["prev_high"] = daily["day_high"].shift(1)
+    daily["prev_low"] = daily["day_low"].shift(1)
+    daily["prev_close"] = daily["day_close"].shift(1)
+    daily["pp"] = (daily["prev_high"] + daily["prev_low"] + daily["prev_close"]) / 3
+    daily["r1"] = 2*daily["pp"] - daily["prev_low"]
+    daily["s1"] = 2*daily["pp"] - daily["prev_high"]
+    x = x.join(daily[["pp", "r1", "s1"]], on="session")
 
     x["ema20"] = ema(x["close"], 20)
     x["ema50"] = ema(x["close"], 50)
