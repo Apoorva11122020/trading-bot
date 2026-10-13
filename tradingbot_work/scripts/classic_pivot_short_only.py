@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 from pathlib import Path
@@ -9,31 +9,10 @@ DEFAULT_DATA = Path("data/historical/upstox_pivot_5m")
 DEFAULT_OUT = Path("reports/pivot_research_backtest")
 
 
-def ema(s: pd.Series, n: int) -> pd.Series:
-    return s.ewm(span=n, adjust=False, min_periods=n).mean()
-
-
-def rsi(s: pd.Series, n: int = 14) -> pd.Series:
-    d = s.diff()
-    gain = d.clip(lower=0)
-    loss = -d.clip(upper=0)
-    ag = gain.ewm(alpha=1/n, adjust=False, min_periods=n).mean()
-    al = loss.ewm(alpha=1/n, adjust=False, min_periods=n).mean()
-    rs = ag / al.replace(0, np.nan)
-    out = 100 - 100/(1+rs)
-    out = out.mask(al.eq(0) & ag.gt(0), 100)
-    out = out.mask(ag.eq(0) & al.gt(0), 0)
-    return out
-
-
-def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
-    pc = df["close"].shift(1)
-    tr = pd.concat([
-        df["high"] - df["low"],
-        (df["high"] - pc).abs(),
-        (df["low"] - pc).abs()
-    ], axis=1).max(axis=1)
-    return tr.ewm(alpha=1/n, adjust=False, min_periods=n).mean()
+try:
+    from scripts.pivot_indicators import atr, ema, rsi
+except ModuleNotFoundError:  # Support direct execution as python scripts/<file>.py
+    from pivot_indicators import atr, ema, rsi
 
 
 def load_data(path: Path) -> pd.DataFrame:
