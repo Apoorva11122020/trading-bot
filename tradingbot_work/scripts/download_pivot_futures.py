@@ -154,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     spot_csv = args.spot_csv or default_csv
     result = run(symbol=args.symbol, spot_csv=spot_csv, start=args.from_date, end=args.to_date,
                  root=args.root, resume=args.resume, validate_only=args.validate)
-    return 0 if result.get("token_leak", {}).get("passed", False) else 1
+    return 0 if result.get("pass", False) and result.get("token_leak", {}).get("passed", False) else 1
 
 
 if __name__ == "__main__":
