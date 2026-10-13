@@ -36,7 +36,9 @@ def test_historical_status_ok(client):
     assert r.status_code == 200
     body = r.text
     assert "UPSTOX_SANDBOX_ACCESS_TOKEN" not in body
-    assert os.getenv("UPSTOX_SANDBOX_ACCESS_TOKEN", "x") not in body
+    token = os.getenv("UPSTOX_SANDBOX_ACCESS_TOKEN")
+    if token:
+        assert token not in body
 
 
 def test_download_refuses_live(monkeypatch, client):
