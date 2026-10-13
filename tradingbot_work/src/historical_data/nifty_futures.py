@@ -42,6 +42,22 @@ CONTRACT_LOOKBACK_DAYS = 100          # a NIFTY monthly future trades ~3 months 
 CONTRACTS_AFTER_END = 2               # first two expiries after the window (front month + next for rollover)
 SEGMENT = "NSE_FO"
 
+# NSE Diwali Muhurat on 2025-10-21 ran 13:45–14:45 IST (12 five-minute candles).
+# This is a valid special session, not a truncated 75-bar regular session.
+SPECIAL_SESSIONS = {date(2025, 10, 21): (time(13, 45), time(14, 45))}
+
+
+def session_slots(day: date) -> list[pd.Timestamp]:
+    """Expected candle starts for a known exchange session, including special sessions."""
+    special = SPECIAL_SESSIONS.get(day)
+    if special is not None:
+        return expected_slots(day, INTERVAL, start=special[0], end=special[1])
+    return expected_slots(day, INTERVAL)
+
+
+def session_slot_count(day: date) -> int:
+    return len(session_slots(day))
+
 # Pre-declared data-quality thresholds (fixed before any futures data was downloaded).
 MAX_ZERO_VOLUME_SHARE = 0.02          # front-month candles with zero volume
 VOLUME_UNAVAILABLE_SHARE = 0.50       # >= this share of zero volume -> FUTURES_VOLUME_UNAVAILABLE
@@ -361,7 +377,7 @@ def session_rows(c: HistoricalContract, frame: pd.DataFrame | None, trading_days
         if d < first or d > c.expiry:
             continue
         got = by_day.get(d, pd.Series([], dtype=ts.dtype))
-        slots = expected_slots(d, INTERVAL)
+        slots = session_slots(d)
         have = set(got)
         miss = [s for s in slots if s not in have]
         miss_s9 = [s for s in miss if s.time() < S9_END]
@@ -580,7 +596,7 @@ def rollover_analysis(contracts: Sequence[HistoricalContract], frames: dict[str,
         sgap = s_open - s_close if s_open is not None and s_close is not None else None
         disc = gap - sgap if sgap is not None else None
         near = [d for d in trading_days if abs((d - da).days) <= 4]
-        miss = lambda f: sum(max(0, SLOTS - int((_days_of(f) == d).sum())) for d in near  # noqa: E731
+        miss = lambda f: sum(max(0, session_slot_count(d) - int((_days_of(f) == d).sum())) for d in near  # noqa: E731
                              if (_days_of(f) == d).any())
         vo, vn = _daily_volume(fo, da), _daily_volume(fn, da)
         rows.append({
@@ -621,7 +637,7 @@ def alignment(selection: Sequence[dict], bars: pd.DataFrame, spot: pd.DataFrame,
         s_ts = set(spot_close.index[spot_close.index.date == d])
         f_day = fb[fb["timestamp"].dt.date == d] if not fb.empty else fb
         f_ts = set(f_day["timestamp"])
-        grid = set(expected_slots(d, INTERVAL))
+        grid = set(session_slots(d))
         exact = s_ts & f_ts
         mism = len([t for t in f_ts if t not in grid])
         basis = 0.0
@@ -679,8 +695,11 @@ def validate_store(*, root: str | Path, start: date, end: date, spot: pd.DataFra
         if r["status"] != SELECTED:
             missing_rows.append({"scope": "SESSION_NO_CAUSAL_CONTRACT", "instrument_key": r.get("instrument_key"),
                                  "trading_symbol": r.get("trading_symbol"), "expiry": r.get("expiry"),
-                                 "trading_date": r["session_date"], "expected": SLOTS, "candles": r.get("candles", 0),
-                                 "missing": SLOTS, "missing_s9_window": S9_SLOTS, "reason": r["reason"]})
+                                 "trading_date": r["session_date"], "expected": session_slot_count(date.fromisoformat(r["session_date"])),
+                                 "candles": r.get("candles", 0),
+                                 "missing": session_slot_count(date.fromisoformat(r["session_date"])),
+                                 "missing_s9_window": sum(slot.time() < S9_END for slot in session_slots(date.fromisoformat(r["session_date"]))),
+                                 "reason": r["reason"]})
     vol_front = volume_stats(bars["volume"]) if not bars.empty else volume_stats(pd.Series([], dtype=float))
     s9_bars = bars[bars["timestamp"].dt.time < S9_END] if not bars.empty else bars
     vol_s9 = volume_stats(s9_bars["volume"]) if not bars.empty else vol_front
@@ -697,7 +716,8 @@ def validate_store(*, root: str | Path, start: date, end: date, spot: pd.DataFra
     invalid = u6._read_csv(layout.invalid)
     leak_ok, leaks = u6.token_leak_check([layout.dir, *extra_scan], secrets)
     discovery = json.loads(layout.discovery.read_text(encoding="utf-8")) if layout.discovery.is_file() else {}
-    front_missing = sum(max(0, SLOTS - int(r["candles"])) for r in selection if r["status"] == SELECTED)
+    front_missing = sum(max(0, session_slot_count(date.fromisoformat(r["session_date"])) - int(r["candles"]))
+                        for r in selection if r["status"] == SELECTED)
     dups = sum(int(r.get("duplicates") or 0) for r in missing_rows) + sum(q.get("duplicate_timestamps", 0)
                                                                          for q in files.values())
     stored_ok = bool(files) and all(q["ok"] for q in files.values())
