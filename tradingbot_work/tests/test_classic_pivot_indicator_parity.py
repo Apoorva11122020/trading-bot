@@ -51,3 +51,25 @@ def test_atr_uses_wilder_rma_seed():
     assert np.isnan(actual.iloc[0:2]).all()
     assert np.isclose(actual.iloc[2], 1.0)
     assert np.isclose(actual.iloc[3], 1.0)
+
+def test_pivots_ignore_out_of_session_candles():
+    timestamps = pd.to_datetime([
+        "2026-10-01 09:15:00+05:30",
+        "2026-10-01 15:25:00+05:30",
+        "2026-10-01 15:35:00+05:30",
+        "2026-10-02 09:20:00+05:30",
+    ])
+    candles = pd.DataFrame({
+        "ts": timestamps,
+        "session": timestamps.date,
+        "open": [100.0, 100.0, 500.0, 100.0],
+        "high": [105.0, 110.0, 1000.0, 102.0],
+        "low": [95.0, 90.0, 1.0, 98.0],
+        "close": [100.0, 100.0, 500.0, 100.0],
+        "volume": [0.0, 0.0, 0.0, 0.0],
+    })
+    prepared = oos_backtest.prepare(candles, volume_filter=False)
+    second_day = prepared.loc[prepared["session"] == timestamps[3].date()].iloc[0]
+    # Previous regular-session H/L/C = 110/90/100, so PP = 100.
+    assert np.isclose(second_day["pp"], 100.0)
+
