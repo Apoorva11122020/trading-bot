@@ -70,7 +70,7 @@ def prepare(df: pd.DataFrame, volume_filter: bool) -> pd.DataFrame:
 
     minutes = x["ts"].dt.hour * 60 + x["ts"].dt.minute
     x["in_session"] = (minutes >= 9 * 60 + 20) & (minutes < 15 * 60)
-    x["flat_time"] = minutes >= 15 * 60 + 15
+    x["flat_time"] = minutes >= 15 * 60
     x["bear_ok"] = (x["ema20"] < x["ema50"]) & (x["rsi14"] < 45)
     if volume_filter:
         vok = x["vol_avg20"].gt(0) & x["volume"].gt(x["vol_avg20"] * 1.2)
@@ -120,17 +120,18 @@ def backtest(
     slippage_points: float,
     atr_buffer: float = 0.1,
     rr: float = 1.5,
+    min_tick: float = 0.05,
 ) -> tuple[pd.DataFrame, dict]:
     # Indicators/signals are calculated on the full history to preserve warm-up.
     # Only entries are restricted to the requested date window; open trades are
-    # force-closed at the last available candle inside that window.
+    # force-closed at the requested window end. The Pine Strategy appendix closes at 15:00.
     x = prepare(df, volume_filter)
     start_ts = pd.Timestamp(start_date).date()
     end_ts = pd.Timestamp(end_date).date()
     x["in_test_window"] = x["ts"].dt.date.between(start_ts, end_ts)
     minutes = x["ts"].dt.hour * 60 + x["ts"].dt.minute
     x["flat_window_end"] = (
-        x["ts"].dt.date.eq(end_ts) & (minutes >= 15 * 60 + 15)
+        x["ts"].dt.date.eq(end_ts) & (minutes >= 15 * 60)
     )
 
     trades = []
@@ -191,7 +192,7 @@ def backtest(
                 stop = float(row["high"] + current_atr * atr_buffer)
                 risk = stop - entry
                 target = entry - risk * rr
-                if risk > 0 and np.isfinite(risk):
+                if risk > min_tick and np.isfinite(risk):
                     pos = {
                         "symbol": symbol,
                         "session": row["session"],
@@ -204,7 +205,7 @@ def backtest(
                     }
 
     # Close at the last candle *within the requested end date*, never a later
-    # row outside the test window. This also covers datasets ending before 15:15.
+    # row outside the test window. This also covers datasets ending before 15:00.
     if pos is not None:
         eligible = x.loc[x["ts"].dt.date.between(start_ts, end_ts)]
         if not eligible.empty:
@@ -252,6 +253,7 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--commission-pct", type=float, default=0.0)
     parser.add_argument("--slippage-points", type=float, default=0.0)
+    parser.add_argument("--min-tick", type=float, default=0.05)
     parser.add_argument("--development-start", default="2025-10-01")
     parser.add_argument("--development-end", default="2026-05-31")
     parser.add_argument("--test-start", default="2026-06-01")
@@ -260,6 +262,8 @@ def main() -> None:
 
     if args.slippage_points < 0 or args.commission_pct < 0:
         parser.error("commission and slippage must be >= 0")
+    if args.min_tick <= 0:
+        parser.error("min-tick must be > 0")
 
     dev_start = pd.Timestamp(args.development_start).date()
     dev_end = pd.Timestamp(args.development_end).date()
@@ -290,7 +294,7 @@ def main() -> None:
             # Volume filter OFF by default in analysis because source volume is zero.
             trades, summary = backtest(
                 raw, symbol, False, start, end,
-                args.commission_pct, args.slippage_points
+                args.commission_pct, args.slippage_points, min_tick=args.min_tick
             )
             summary["period"] = period_name
             summaries.append(summary)
