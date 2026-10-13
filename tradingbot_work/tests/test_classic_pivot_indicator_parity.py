@@ -73,3 +73,53 @@ def test_pivots_ignore_out_of_session_candles():
     # Previous regular-session H/L/C = 110/90/100, so PP = 100.
     assert np.isclose(second_day["pp"], 100.0)
 
+
+
+def test_oos_backtest_force_closes_at_last_candle_in_window():
+    # A SHORT signal is injected on the first eligible candle. The next
+    # available candle is after the requested test window and must not be used
+    # as the position's closing price.
+    timestamps = pd.date_range(
+        "2026-06-01 09:15", periods=14, freq="5min", tz="Asia/Kolkata"
+    )
+    timestamps = timestamps.append(pd.DatetimeIndex([
+        pd.Timestamp("2026-06-03 09:15", tz="Asia/Kolkata")
+    ]))
+    closes = np.linspace(100.0, 90.0, len(timestamps))
+    frame = pd.DataFrame({
+        "ts": timestamps,
+        "session": timestamps.date,
+        "open": closes,
+        "high": closes + 0.5,
+        "low": closes - 0.5,
+        "close": closes,
+        "volume": 1.0,
+    })
+
+    # Make the signal deterministic while leaving the actual exit manager
+    # under test. Signals outside the requested window remain false.
+    original_prepare = oos_backtest.prepare
+    def prepared_with_signal(df, volume_filter):
+        result = original_prepare(df, volume_filter)
+        result["short_signal"] = False
+        result.loc[result.index[0], "short_signal"] = True
+        result["atr14"] = 1.0
+        result["flat_time"] = False
+        result["flat_window_end"] = (
+            result["ts"].dt.date == pd.Timestamp("2026-06-01").date()
+        ) & (result["ts"].dt.hour * 60 + result["ts"].dt.minute >= 15 * 60 + 15)
+        return result
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(oos_backtest, "prepare", prepared_with_signal)
+    try:
+        trades, _ = oos_backtest.backtest(
+            frame, "NIFTY_50", False,
+            pd.Timestamp("2026-06-01"), pd.Timestamp("2026-06-01"),
+            commission_pct=0.0, slippage_points=0.0,
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert len(trades) == 1
+    assert pd.Timestamp(trades.iloc[0]["exit_ts"]).date() == pd.Timestamp("2026-06-01").date()
