@@ -119,7 +119,9 @@ def load_front_month(symbol: str, root: Path) -> tuple[pd.DataFrame, pd.DataFram
         # Indicator warm-up is contract-local: no cross-expiry synthetic price series.
         f["lot_size"] = int(metadata[key]["lot_size"])
         f["atr14_fut"] = atr(f, 14)
-        f["vol_avg20_fut"] = f["volume"].rolling(20, min_periods=20).mean()
+        # Compare the current completed candle against the PREVIOUS 20 candles only.
+        # Including current volume in its own baseline weakens the intended volume filter.
+        f["vol_avg20_fut"] = f["volume"].shift(1).rolling(20, min_periods=20).mean()
         f["session"] = f["ts"].dt.date
         frames.append(f)
     all_bars = pd.concat(frames, ignore_index=True)
