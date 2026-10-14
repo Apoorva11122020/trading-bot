@@ -178,22 +178,31 @@ def make_signals(spot: pd.DataFrame, futures: pd.DataFrame) -> pd.DataFrame:
     return merged.sort_values("ts").reset_index(drop=True)
 
 
-def upstox_futures_fees_inr(entry: float, exit_price: float, side: str, lot: int, exit_date: date) -> float:
-    """Estimated NSE equity-futures charges for two executed Upstox orders, one lot.
+def upstox_futures_fees_inr(
+    entry: float, exit_price: float, side: str, lot: int, entry_date: date, exit_date: date
+) -> float:
+    """Estimate NSE equity-futures charges for two executed Upstox orders, one lot.
 
-    Rates: NSE transaction 0.00183% each side (from 2026-03-01), SEBI 0.0001%
-    each side, stamp duty 0.002% buy side, STT 0.02% sell before 2026-04-01
-    and 0.05% thereafter, GST 18% on brokerage + exchange + SEBI fees.
-    Does not model rounding at contract-note level or account-specific plans.
+    Applies the rate effective on each transaction date: NSE transaction charge
+    0.00183% per side from 2026-03-01 (0.00173% before), STT on the sell order
+    0.02% before 2026-04-01 and 0.05% thereafter, SEBI fee 0.0001% per side,
+    stamp duty 0.002% on the buy order, and 18% GST on brokerage + exchange +
+    SEBI fees. Brokerage is capped at Rs 20 per order.
+    Does not model contract-note rounding or account-specific plans.
     """
-    buy = (entry if side == "LONG" else exit_price) * lot
-    sell = (exit_price if side == "LONG" else entry) * lot
+    buy_price = entry if side == "LONG" else exit_price
+    sell_price = exit_price if side == "LONG" else entry
+    buy_date = entry_date if side == "LONG" else exit_date
+    sell_date = exit_date if side == "LONG" else entry_date
+    buy = buy_price * lot
+    sell = sell_price * lot
     turnover = buy + sell
     brokerage = min(20.0, buy * 0.0005) + min(20.0, sell * 0.0005)
-    exchange = turnover * (0.0000183 if exit_date >= date(2026, 3, 1) else 0.0000173)
+    exchange_rate = lambda d: 0.0000183 if d >= date(2026, 3, 1) else 0.0000173
+    exchange = buy * exchange_rate(buy_date) + sell * exchange_rate(sell_date)
     sebi = turnover * 0.000001
     stamp = buy * 0.00002
-    stt = sell * (0.0005 if exit_date >= date(2026, 4, 1) else 0.0002)
+    stt = sell * (0.0005 if sell_date >= date(2026, 4, 1) else 0.0002)
     gst = (brokerage + exchange + sebi) * 0.18
     return brokerage + exchange + sebi + stamp + stt + gst
 
@@ -202,8 +211,11 @@ def finish(pos: dict, ts, price: float, reason: str, cost_model: str, slip: floa
     direction = 1 if pos["side"] == "LONG" else -1
     gross = (price - pos["entry"]) * direction
     exit_date = pd.Timestamp(ts).date()
-    fees_inr = (upstox_futures_fees_inr(pos["entry"], price, pos["side"], lot, exit_date)
-                if cost_model == "upstox" else 0.0)
+    entry_date = pd.Timestamp(pos["entry_ts"]).date()
+    fees_inr = (
+        upstox_futures_fees_inr(pos["entry"], price, pos["side"], lot, entry_date, exit_date)
+        if cost_model == "upstox" else 0.0
+    )
     fees_points = fees_inr / lot
     cost = 2 * slip + fees_points
     net = gross - cost
