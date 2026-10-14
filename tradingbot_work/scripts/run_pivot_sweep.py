@@ -10,6 +10,9 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORTS = ROOT / "reports"
+# New versioned output avoids silently reusing old summaries created before the
+# fee-model audit. OOS rows are reported only for validation, never used to rank candidates.
+SWEEP_ROOT = REPORTS / "pivot_sweep_cost_audit_20261014"
 RR_VALUES = (1.0, 1.5, 2.0)
 ATR_VALUES = (0.1, 0.2, 0.3)
 SPLITS = ("DEVELOPMENT", "OOS")
@@ -20,7 +23,7 @@ def main() -> int:
     for rr in RR_VALUES:
         for atr_buffer in ATR_VALUES:
             name = f"pivot_sweep_rr{rr:g}_atr{atr_buffer:g}"
-            out_dir = REPORTS / name
+            out_dir = SWEEP_ROOT / name
             summary_path = out_dir / "summary.csv"
             if summary_path.is_file():
                 print(f"[SKIP existing] RR={rr:g}, ATR={atr_buffer:g}: {summary_path.relative_to(ROOT)}", flush=True)
@@ -70,15 +73,20 @@ def main() -> int:
     for col in ("trades", "net_points", "profit_factor", "max_drawdown_points"):
         results[col] = pd.to_numeric(results[col], errors="coerce")
     results = results.sort_values(["symbol", "split", "profit_factor"], ascending=[True, True, False])
-    csv_path = REPORTS / "pivot_sweep_comparison.csv"
+    csv_path = SWEEP_ROOT / "pivot_sweep_comparison.csv"
     results.to_csv(csv_path, index=False)
 
     cols = ["combination", "symbol", "split", "trades", "net_points", "profit_factor", "max_drawdown_points"]
-    print("\nVOLUME FILTER ON — DEVELOPMENT vs OOS (estimated Upstox costs, 1 point/side slippage)")
-    print(results[cols].to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+    dev = results[results["split"] == "DEVELOPMENT"].copy()
+    dev = dev.sort_values(["symbol", "profit_factor"], ascending=[True, False])
+    oos = results[results["split"] == "OOS"].copy().sort_values(["symbol", "combination"])
+    print("\nDEVELOPMENT RANKING ONLY — volume filter ON, estimated Upstox costs, 1 point/side slippage")
+    print(dev[cols].to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+    print("\nOOS VALIDATION ONLY — DO NOT use these rows to select parameters")
+    print(oos[cols].to_string(index=False, float_format=lambda v: f"{v:.3f}"))
     print(f"\nSaved comparison: {csv_path}")
     print("PAPER | RESEARCH ONLY | ORDERS: 0")
-    print("Do not select parameters based on OOS; use development for candidate selection and keep OOS as validation.")
+    print("Select candidates using DEVELOPMENT only; OOS remains validation and must not drive parameter tuning.")
     return 0
 
 
