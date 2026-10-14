@@ -42,9 +42,14 @@ CONTRACT_LOOKBACK_DAYS = 100          # a NIFTY monthly future trades ~3 months 
 CONTRACTS_AFTER_END = 2               # first two expiries after the window (front month + next for rollover)
 SEGMENT = "NSE_FO"
 
-# NSE Diwali Muhurat on 2025-10-21 ran 13:45–14:45 IST (12 five-minute candles).
-# This is a valid special session, not a truncated 75-bar regular session.
-SPECIAL_SESSIONS = {date(2025, 10, 21): (time(13, 45), time(14, 45))}
+# Known NSE special sessions in this research window.
+# Diwali Muhurat 2025-10-21 ran 13:45–14:45 IST (12 five-minute candles).
+# Union Budget Sunday session 2026-02-01 ran regular 09:15–15:30 IST (75 candles).
+# These are exchange-authorized sessions, not ordinary weekend trading.
+SPECIAL_SESSIONS = {
+    date(2025, 10, 21): (time(13, 45), time(14, 45)),
+    date(2026, 2, 1): (SESSION_START, SESSION_END),
+}
 
 
 def session_slots(day: date) -> list[pd.Timestamp]:
@@ -234,7 +239,9 @@ def validate_futures(frame: pd.DataFrame, *, expiry: date | None = None,
         t = local.dt
         flag(((t.minute % interval) != 0) | (t.second != 0) | (t.microsecond != 0), "OFF_GRID")
         flag((t.time < SESSION_START) | (t.time >= SESSION_END), "OUTSIDE_SESSION")
-        flag(t.weekday >= 5, "WEEKEND")
+        weekend = t.weekday >= 5
+        special_dates = t.date.isin(SPECIAL_SESSIONS)
+        flag(weekend & ~special_dates, "WEEKEND")
         if expiry is not None:
             flag(t.date > expiry, "AFTER_EXPIRY")
     ok = np.array([not r for r in reasons])
