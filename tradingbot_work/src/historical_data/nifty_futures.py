@@ -298,10 +298,22 @@ def download_contract(client, c: HistoricalContract, layout: FuturesLayout, mani
         return {"status": "OUT_OF_WINDOW", "invalid": pd.DataFrame(columns=INVALID_COLUMNS), "window": None}
     months = u6.month_windows(*win)
     prev = [manifest.get(c.instrument_key, m) for m, _, _ in months]
-    if path.is_file() and all(p and p["status"] in (u6.SUCCESS, u6.EMPTY) for p in prev):
-        q = file_checks(u6.read_parquet(path), c.expiry)
-        if q["ok"]:
-            return {"status": "SKIPPED_VALID", "invalid": None, "window": win}
+    # A prior download may have stored the Feb 1 2026 Sunday session as invalid
+    # (WEEKEND) and then looked healthy because rejected rows are not stored.
+    # Force a refresh for any contract window covering a known special session
+    # when that session has no stored candles.
+    needs_special_refresh = False
+    if path.is_file():
+        stored = u6.read_parquet(path)
+        stored_dates = set(_days_of(stored)) if not stored.empty else set()
+        needs_special_refresh = any(
+            win[0] <= special_day <= win[1] and special_day not in stored_dates
+            for special_day in SPECIAL_SESSIONS
+        )
+        if all(p and p["status"] in (u6.SUCCESS, u6.EMPTY) for p in prev):
+            q = file_checks(stored, c.expiry)
+            if q["ok"] and not needs_special_refresh:
+                return {"status": "SKIPPED_VALID", "invalid": None, "window": win}
     if resume and not path.is_file() and prev and all(p and p["status"] in (u6.EMPTY, u6.UNAVAILABLE) for p in prev):
         return {"status": "SKIPPED_TERMINAL", "invalid": None, "window": win}
     parts, failed = [], []
