@@ -152,8 +152,11 @@ def make_signals(spot: pd.DataFrame, futures: pd.DataFrame) -> pd.DataFrame:
     x["ema20_spot"] = ema(x["close"], 20)
     x["ema50_spot"] = ema(x["close"], 50)
     x["rsi14_spot"] = rsi(x["close"], 14)
-    prev_close = x["close"].shift(1)
-    prev_pp, prev_r1, prev_s1 = x["pp"].shift(1), x["r1"].shift(1), x["s1"].shift(1)
+    # Compare both candles against the SAME session's pivot levels. Shifting pivot
+    # levels across sessions can fabricate a "cross" when the pivot itself changes.
+    # Also require a prior candle in the same session; never manufacture an opening-bar cross.
+    prev_close = x.groupby("session", sort=False)["close"].shift(1)
+    prev_pp, prev_r1, prev_s1 = x["pp"], x["r1"], x["s1"]
     x["cross_up"] = (((x["close"] > x["pp"]) & (prev_close <= prev_pp)) |
                      ((x["close"] > x["r1"]) & (prev_close <= prev_r1)))
     x["cross_down"] = (((x["close"] < x["pp"]) & (prev_close >= prev_pp)) |
