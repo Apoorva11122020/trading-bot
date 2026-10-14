@@ -75,14 +75,26 @@ def load_front_month(symbol: str, root: Path) -> tuple[pd.DataFrame, pd.DataFram
         raise SystemExit(f"{symbol}: empty contract-selection or contract metadata file")
     selection["session_date"] = pd.to_datetime(selection["session_date"], errors="coerce").dt.date
     selection = selection[(selection["session_date"] >= START) & (selection["session_date"] <= END)].copy()
-    if selection.empty or not selection["status"].eq("SELECTED").all():
-        bad = selection.loc[selection["status"] != "SELECTED", ["session_date", "status", "reason"]].head(10)
-        raise SystemExit(f"{symbol}: selection has unavailable sessions; refusing partial backtest:\n{bad}")
+    if selection.empty:
+        raise SystemExit(f"{symbol}: no contract-selection sessions in research window")
+    # Preserve missing sessions explicitly. They are excluded from execution, never imputed;
+    # the resulting report is clearly marked INCOMPLETE rather than silently presented as full coverage.
+    invalid_status = ~selection["status"].isin(["SELECTED", "DATA_UNAVAILABLE"])
+    if invalid_status.any():
+        bad = selection.loc[invalid_status, ["session_date", "status", "reason"]].head(10)
+        raise SystemExit(f"{symbol}: unknown selection status values:\n{bad}")
+    unavailable = selection.loc[selection["status"] != "SELECTED", ["session_date", "status", "reason"]]
+    if not unavailable.empty:
+        print(f"WARNING {symbol}: {len(unavailable)} unavailable session(s); no candles will be fabricated:")
+        print(unavailable.to_string(index=False))
+    selected = selection.loc[selection["status"] == "SELECTED"].copy()
+    if selected.empty:
+        raise SystemExit(f"{symbol}: no SELECTED sessions available for backtest")
     if selection["session_date"].duplicated().any():
         raise SystemExit(f"{symbol}: duplicate session dates in selection CSV")
     metadata = contracts.set_index("instrument_key").to_dict("index")
     frames = []
-    for key in selection["instrument_key"].dropna().unique():
+    for key in selected["instrument_key"].dropna().unique():
         if key not in metadata:
             raise SystemExit(f"{symbol}: selected key missing from contracts.csv: {key}")
         expiry = str(metadata[key]["expiry"])[:10]
@@ -111,7 +123,7 @@ def load_front_month(symbol: str, root: Path) -> tuple[pd.DataFrame, pd.DataFram
         f["session"] = f["ts"].dt.date
         frames.append(f)
     all_bars = pd.concat(frames, ignore_index=True)
-    chosen = selection[["session_date", "instrument_key"]].rename(columns={"session_date": "session"})
+    chosen = selected[["session_date", "instrument_key"]].rename(columns={"session_date": "session"})
     # Keep only the contract explicitly selected for each session; never fall back to a later expiry.
     all_bars = all_bars.merge(chosen, on=["session", "instrument_key"], how="inner", validate="many_to_one")
     if all_bars.empty:
@@ -266,16 +278,28 @@ def main() -> int:
     if a.commission_pct < 0 or a.slippage_points < 0 or a.rr <= 0 or a.atr_buffer < 0:
         p.error("costs/buffer must be nonnegative and rr must be positive")
     a.out_dir.mkdir(parents=True, exist_ok=True)
-    summaries, all_trades = [], []
+    summaries, all_trades, coverage_rows = [], [], []
     for symbol, spot_name in (
         ("NIFTY", "NIFTY_50_5m_2025-10-01_to_2026-10-09.csv"),
         ("BANKNIFTY", "BANK_NIFTY_5m_2025-10-01_to_2026-10-09.csv"),
     ):
         spot = load_spot(a.spot_root / spot_name)
         futures, selection = load_front_month(symbol, a.data_root)
+        unavailable = selection.loc[selection["status"] != "SELECTED", ["session_date", "status", "reason"]].copy()
+        if unavailable.empty:
+            coverage_rows.append({"symbol": symbol, "coverage_status": "COMPLETE",
+                                  "unavailable_sessions": 0, "unavailable_dates": "", "reasons": ""})
+        else:
+            coverage_rows.append({
+                "symbol": symbol, "coverage_status": "INCOMPLETE_DATA_UNAVAILABLE",
+                "unavailable_sessions": len(unavailable),
+                "unavailable_dates": ";".join(str(d) for d in unavailable["session_date"]),
+                "reasons": ";".join(str(r) for r in unavailable["reason"]),
+            })
         merged = make_signals(spot, futures)
         print(f"{symbol}: spot={len(spot)} bars, selected futures={len(futures)} bars, "
-              f"selection_sessions={len(selection)}, aligned={len(merged)} bars")
+              f"selection_sessions={len(selection)}, aligned={len(merged)} bars, "
+              f"coverage={'INCOMPLETE' if not unavailable.empty else 'COMPLETE'}")
         # Restrict to the dates covered by the verified causal selection and matching spot bars.
         for vf in (False, True):
             trades = run_one(merged, symbol, vf, a.commission_pct, a.slippage_points, a.rr, a.atr_buffer, 1)
@@ -295,16 +319,29 @@ def main() -> int:
                     # Both entry and exit must belong to the same split; never let a trade straddle the boundary.
                     subset = trades[(st >= start) & (et <= end)].copy()
                 summaries.append(summarize(subset, symbol, vf, split))
+    coverage_df = pd.DataFrame(coverage_rows)
+    coverage_path = a.out_dir / "data_coverage.csv"
+    coverage_df.to_csv(coverage_path, index=False)
+    summary_df = pd.DataFrame(summaries)
+    if not coverage_df.empty:
+        summary_df = summary_df.merge(
+            coverage_df[["symbol", "coverage_status", "unavailable_sessions", "unavailable_dates", "reasons"]],
+            on="symbol", how="left", validate="many_to_one",
+        )
     summary_path = a.out_dir / "summary.csv"
-    pd.DataFrame(summaries).to_csv(summary_path, index=False)
+    summary_df.to_csv(summary_path, index=False)
     if all_trades:
         pd.concat(all_trades, ignore_index=True).to_csv(a.out_dir / "trades.csv", index=False)
     print("\nSUMMARY (estimated costs; INR is approximate one-lot P&L)")
-    print(pd.DataFrame(summaries).to_string(index=False))
-    print(f"\nReports: {a.out_dir.resolve()}")
+    print(summary_df.to_string(index=False))
+    print(f"\nData coverage: {coverage_path.resolve()}")
+    print(f"Reports: {a.out_dir.resolve()}")
     print("PAPER | RESEARCH ONLY | ORDERS: 0")
     print("Caveat: signals use spot-index pivots/EMA/RSI; fills, ATR stops and volume use selected futures. "
           "Fees are estimates, not broker-accurate. OOS is 2026-06-01 onward.")
+    if any(r["coverage_status"] != "COMPLETE" for r in coverage_rows):
+        print("IMPORTANT: INCOMPLETE DATA COVERAGE. Do not treat these metrics as a fully covered backtest; "
+              "see data_coverage.csv. Missing sessions were not imputed.")
     return 0
 
 
