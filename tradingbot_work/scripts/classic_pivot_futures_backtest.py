@@ -105,6 +105,7 @@ def load_front_month(symbol: str, root: Path) -> tuple[pd.DataFrame, pd.DataFram
         if not f["instrument_key"].eq(key).all():
             raise SystemExit(f"{file}: instrument_key mismatch")
         # Indicator warm-up is contract-local: no cross-expiry synthetic price series.
+        f["lot_size"] = int(metadata[key]["lot_size"])
         f["atr14_fut"] = atr(f, 14)
         f["vol_avg20_fut"] = f["volume"].rolling(20, min_periods=20).mean()
         f["session"] = f["ts"].dt.date
@@ -152,7 +153,7 @@ def make_signals(spot: pd.DataFrame, futures: pd.DataFrame) -> pd.DataFrame:
     x["bear_ok"] = (x["ema20_spot"] < x["ema50_spot"]) & (x["rsi14_spot"] < 45)
     x["long_signal"] = x["in_session"] & x["cross_up"] & x["bull_ok"]
     x["short_signal"] = x["in_session"] & x["cross_down"] & x["bear_ok"]
-    fcols = ["ts", "instrument_key", "trading_symbol", "expiry", "open", "high", "low", "close",
+    fcols = ["ts", "instrument_key", "trading_symbol", "expiry", "lot_size", "open", "high", "low", "close",
              "volume", "atr14_fut", "vol_avg20_fut"]
     merged = x.merge(futures[fcols], on="ts", how="inner", suffixes=("_spot", "_fut"), validate="one_to_one")
     if merged.empty:
@@ -183,25 +184,25 @@ def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, commission_pct: 
         ts, session = row["ts"], row["session"]
         if pos is not None and session != pos["session"]:
             prev = x.iloc[i - 1]
-            trades.append(finish(pos, prev["ts"], float(prev["close"]), "session_boundary",
-                                 commission_pct, slip, lot))
+            trades.append(finish(pos, prev["ts"], float(prev["close_fut"]), "session_boundary",
+                                 commission_pct, slip, int(pos["lot_size"])))
             pos = None
         if pos is not None:
             exit_price, reason = None, None
             if pos["side"] == "LONG":
-                if row["low"] <= pos["stop"]:
+                if row["low_fut"] <= pos["stop"]:
                     exit_price, reason = pos["stop"], "stop"
-                elif row["high"] >= pos["target"]:
+                elif row["high_fut"] >= pos["target"]:
                     exit_price, reason = pos["target"], "target"
             else:
-                if row["high"] >= pos["stop"]:
+                if row["high_fut"] >= pos["stop"]:
                     exit_price, reason = pos["stop"], "stop"
-                elif row["low"] <= pos["target"]:
+                elif row["low_fut"] <= pos["target"]:
                     exit_price, reason = pos["target"], "target"
             if exit_price is None and bool(row["flat_time"]):
-                exit_price, reason = float(row["close"]), "intraday_flat"
+                exit_price, reason = float(row["close_fut"]), "intraday_flat"
             if exit_price is not None:
-                trades.append(finish(pos, ts, float(exit_price), reason, commission_pct, slip, lot))
+                trades.append(finish(pos, ts, float(exit_price), reason, commission_pct, slip, int(pos["lot_size"])))
                 pos = None
         if pos is None and not (trades and trades[-1]["exit_ts"] == ts):
             vol_ok = (pd.notna(row["vol_avg20_fut"]) and row["vol_avg20_fut"] > 0 and
@@ -210,24 +211,24 @@ def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, commission_pct: 
             short_signal = bool(row["short_signal"]) and (vol_ok or not volume_filter)
             if long_signal or short_signal:
                 side = "LONG" if long_signal else "SHORT"
-                entry, a = float(row["close"]), row["atr14_fut"]
+                entry, a = float(row["close_fut"]), row["atr14_fut"]
                 if pd.notna(a) and float(a) > 0:
                     if side == "LONG":
-                        stop = float(row["low"] - a * atr_buffer)
+                        stop = float(row["low_fut"] - a * atr_buffer)
                         risk = entry - stop
                         target = entry + risk * rr
                     else:
-                        stop = float(row["high"] + a * atr_buffer)
+                        stop = float(row["high_fut"] + a * atr_buffer)
                         risk = stop - entry
                         target = entry - risk * rr
                     if np.isfinite(risk) and risk > 0:
                         pos = {"symbol": symbol, "side": side, "session": session, "entry_ts": ts,
                                "entry": entry, "stop": stop, "target": target,
-                               "contract": row["trading_symbol"], "expiry": str(row["expiry"])[:10]}
+                               "contract": row["trading_symbol"], "expiry": str(row["expiry"])[:10], "lot_size": int(row["lot_size"])}
     if pos is not None and len(x):
         row = x.iloc[-1]
-        trades.append(finish(pos, row["ts"], float(row["close"]), "end_of_data",
-                             commission_pct, slip, lot))
+        trades.append(finish(pos, row["ts"], float(row["close_fut"]), "end_of_data",
+                             commission_pct, slip, int(pos["lot_size"])))
     return pd.DataFrame(trades)
 
 
@@ -266,9 +267,9 @@ def main() -> int:
         p.error("costs/buffer must be nonnegative and rr must be positive")
     a.out_dir.mkdir(parents=True, exist_ok=True)
     summaries, all_trades = [], []
-    for symbol, spot_name, lot in (
-        ("NIFTY", "NIFTY_50_5m_2025-10-01_to_2026-10-09.csv", 75),
-        ("BANKNIFTY", "BANK_NIFTY_5m_2025-10-01_to_2026-10-09.csv", 35),
+    for symbol, spot_name in (
+        ("NIFTY", "NIFTY_50_5m_2025-10-01_to_2026-10-09.csv"),
+        ("BANKNIFTY", "BANK_NIFTY_5m_2025-10-01_to_2026-10-09.csv"),
     ):
         spot = load_spot(a.spot_root / spot_name)
         futures, selection = load_front_month(symbol, a.data_root)
@@ -277,7 +278,7 @@ def main() -> int:
               f"selection_sessions={len(selection)}, aligned={len(merged)} bars")
         # Restrict to the dates covered by the verified causal selection and matching spot bars.
         for vf in (False, True):
-            trades = run_one(merged, symbol, vf, a.commission_pct, a.slippage_points, a.rr, a.atr_buffer, lot)
+            trades = run_one(merged, symbol, vf, a.commission_pct, a.slippage_points, a.rr, a.atr_buffer, 1)
             if not trades.empty:
                 trades["volume_filter"] = vf
                 all_trades.append(trades)
