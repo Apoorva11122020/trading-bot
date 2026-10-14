@@ -190,53 +190,95 @@ def finish(pos: dict, ts, price: float, reason: str, commission_pct: float, slip
 
 def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, commission_pct: float, slip: float,
             rr: float, atr_buffer: float, lot: int) -> pd.DataFrame:
-    x = df.copy()
-    trades, pos = [], None
+    """Simulate signals at candle close and enter at the next same-session 5-minute bar open."""
+    x = df.copy().sort_values("ts").reset_index(drop=True)
+    trades, pos, pending = [], None, None
+
     for i, row in x.iterrows():
         ts, session = row["ts"], row["session"]
+
+        # Never carry positions or pending entries across sessions.
         if pos is not None and session != pos["session"]:
             prev = x.iloc[i - 1]
             trades.append(finish(pos, prev["ts"], float(prev["close_fut"]), "session_boundary",
                                  commission_pct, slip, int(pos["lot_size"])))
             pos = None
+        if pending is not None and (
+            session != pending["session"]
+            or row["instrument_key"] != pending["instrument_key"]
+            or (ts - pending["signal_ts"]).total_seconds() > 5 * 60 + 1
+        ):
+            pending = None
+
+        # A signal is only known after its candle closes; execute at the next bar's open.
+        if pos is None and pending is not None:
+            entry = float(row["open_fut"])
+            signal_row = pending["signal_row"]
+            side = pending["side"]
+            a = signal_row["atr14_fut"]
+            pending = None
+            if pd.notna(a) and float(a) > 0 and np.isfinite(entry):
+                if side == "LONG":
+                    stop = float(signal_row["low_fut"] - float(a) * atr_buffer)
+                    risk = entry - stop
+                    target = entry + risk * rr
+                else:
+                    stop = float(signal_row["high_fut"] + float(a) * atr_buffer)
+                    risk = stop - entry
+                    target = entry - risk * rr
+                if np.isfinite(risk) and risk > 0:
+                    pos = {
+                        "symbol": symbol, "side": side, "session": session, "entry_ts": ts,
+                        "entry": entry, "stop": stop, "target": target,
+                        "contract": row["trading_symbol"], "expiry": str(row["expiry"])[:10],
+                        "lot_size": int(row["lot_size"]),
+                    }
+
+        exited_this_bar = False
         if pos is not None:
             exit_price, reason = None, None
+            # Conservative OHLC handling: if both stop and target are touched, assume stop first.
+            # Account for adverse gaps through the stop at the current bar's open.
             if pos["side"] == "LONG":
-                if row["low_fut"] <= pos["stop"]:
+                if row["open_fut"] <= pos["stop"]:
+                    exit_price, reason = float(row["open_fut"]), "stop_gap"
+                elif row["low_fut"] <= pos["stop"]:
                     exit_price, reason = pos["stop"], "stop"
                 elif row["high_fut"] >= pos["target"]:
                     exit_price, reason = pos["target"], "target"
             else:
-                if row["high_fut"] >= pos["stop"]:
+                if row["open_fut"] >= pos["stop"]:
+                    exit_price, reason = float(row["open_fut"]), "stop_gap"
+                elif row["high_fut"] >= pos["stop"]:
                     exit_price, reason = pos["stop"], "stop"
                 elif row["low_fut"] <= pos["target"]:
                     exit_price, reason = pos["target"], "target"
             if exit_price is None and bool(row["flat_time"]):
                 exit_price, reason = float(row["close_fut"]), "intraday_flat"
             if exit_price is not None:
-                trades.append(finish(pos, ts, float(exit_price), reason, commission_pct, slip, int(pos["lot_size"])))
+                trades.append(finish(pos, ts, float(exit_price), reason, commission_pct, slip,
+                                     int(pos["lot_size"])))
                 pos = None
-        if pos is None and not (trades and trades[-1]["exit_ts"] == ts):
-            vol_ok = (pd.notna(row["vol_avg20_fut"]) and row["vol_avg20_fut"] > 0 and
-                      row["volume_fut"] > row["vol_avg20_fut"] * 1.2)
+                exited_this_bar = True
+
+        # Queue a new signal after this bar closes; it can only fill on the next bar.
+        if pos is None and not exited_this_bar and pending is None:
+            vol_ok = (
+                pd.notna(row["vol_avg20_fut"])
+                and row["vol_avg20_fut"] > 0
+                and row["volume_fut"] > row["vol_avg20_fut"] * 1.2
+            )
             long_signal = bool(row["long_signal"]) and (vol_ok or not volume_filter)
             short_signal = bool(row["short_signal"]) and (vol_ok or not volume_filter)
             if long_signal or short_signal:
-                side = "LONG" if long_signal else "SHORT"
-                entry, a = float(row["close_fut"]), row["atr14_fut"]
-                if pd.notna(a) and float(a) > 0:
-                    if side == "LONG":
-                        stop = float(row["low_fut"] - a * atr_buffer)
-                        risk = entry - stop
-                        target = entry + risk * rr
-                    else:
-                        stop = float(row["high_fut"] + a * atr_buffer)
-                        risk = stop - entry
-                        target = entry - risk * rr
-                    if np.isfinite(risk) and risk > 0:
-                        pos = {"symbol": symbol, "side": side, "session": session, "entry_ts": ts,
-                               "entry": entry, "stop": stop, "target": target,
-                               "contract": row["trading_symbol"], "expiry": str(row["expiry"])[:10], "lot_size": int(row["lot_size"])}
+                pending = {
+                    "side": "LONG" if long_signal else "SHORT",
+                    "session": session,
+                    "signal_ts": ts,
+                    "instrument_key": row["instrument_key"],
+                    "signal_row": row,
+                }
+
     if pos is not None and len(x):
         row = x.iloc[-1]
         trades.append(finish(pos, row["ts"], float(row["close_fut"]), "end_of_data",
