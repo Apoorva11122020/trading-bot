@@ -148,7 +148,7 @@ def make_signals(spot: pd.DataFrame, futures: pd.DataFrame) -> pd.DataFrame:
                        ((x["close"] < x["s1"]) & (prev_close >= prev_s1)))
     mins = x["ts"].dt.hour * 60 + x["ts"].dt.minute
     x["in_session"] = (mins >= 9 * 60 + 20) & (mins < 15 * 60)
-    x["flat_time"] = mins >= 15 * 60
+    x["flat_time"] = mins >= 15 * 60 + 15
     x["bull_ok"] = (x["ema20_spot"] > x["ema50_spot"]) & (x["rsi14_spot"] > 55)
     x["bear_ok"] = (x["ema20_spot"] < x["ema50_spot"]) & (x["rsi14_spot"] < 45)
     x["long_signal"] = x["in_session"] & x["cross_up"] & x["bull_ok"]
