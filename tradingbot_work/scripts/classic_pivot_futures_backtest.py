@@ -173,22 +173,46 @@ def make_signals(spot: pd.DataFrame, futures: pd.DataFrame) -> pd.DataFrame:
     return merged.sort_values("ts").reset_index(drop=True)
 
 
-def finish(pos: dict, ts, price: float, reason: str, commission_pct: float, slip: float, lot: int) -> dict:
+def upstox_futures_fees_inr(entry: float, exit_price: float, side: str, lot: int, exit_date: date) -> float:
+    """Estimated NSE equity-futures charges for two executed Upstox orders, one lot.
+
+    Rates: NSE transaction 0.00183% each side (from 2026-03-01), SEBI 0.0001%
+    each side, stamp duty 0.002% buy side, STT 0.02% sell before 2026-04-01
+    and 0.05% thereafter, GST 18% on brokerage + exchange + SEBI fees.
+    Does not model rounding at contract-note level or account-specific plans.
+    """
+    buy = (entry if side == "LONG" else exit_price) * lot
+    sell = (exit_price if side == "LONG" else entry) * lot
+    turnover = buy + sell
+    brokerage = min(20.0, buy * 0.0005) + min(20.0, sell * 0.0005)
+    exchange = turnover * (0.0000183 if exit_date >= date(2026, 3, 1) else 0.0000173)
+    sebi = turnover * 0.000001
+    stamp = buy * 0.00002
+    stt = sell * (0.0005 if exit_date >= date(2026, 4, 1) else 0.0002)
+    gst = (brokerage + exchange + sebi) * 0.18
+    return brokerage + exchange + sebi + stamp + stt + gst
+
+
+def finish(pos: dict, ts, price: float, reason: str, cost_model: str, slip: float, lot: int) -> dict:
     direction = 1 if pos["side"] == "LONG" else -1
     gross = (price - pos["entry"]) * direction
-    fees_points = (pos["entry"] + price) * commission_pct / 100.0
+    exit_date = pd.Timestamp(ts).date()
+    fees_inr = (upstox_futures_fees_inr(pos["entry"], price, pos["side"], lot, exit_date)
+                if cost_model == "upstox" else 0.0)
+    fees_points = fees_inr / lot
     cost = 2 * slip + fees_points
     net = gross - cost
     return {
         "symbol": pos["symbol"], "side": pos["side"], "entry_ts": pos["entry_ts"], "exit_ts": ts,
         "contract": pos["contract"], "expiry": pos["expiry"], "lot_size": lot,
         "entry": pos["entry"], "exit": price, "stop": pos["stop"], "target": pos["target"],
-        "exit_reason": reason, "gross_points": round(gross, 4), "estimated_cost_points": round(cost, 4),
+        "exit_reason": reason, "gross_points": round(gross, 4), "estimated_fees_inr": round(fees_inr, 2),
+        "estimated_cost_points": round(cost, 4),
         "net_points": round(net, 4), "approx_net_inr_1_lot": round(net * lot, 2),
     }
 
 
-def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, commission_pct: float, slip: float,
+def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, cost_model: str, slip: float,
             rr: float, atr_buffer: float, lot: int) -> pd.DataFrame:
     """Simulate signals at candle close and enter at the next same-session 5-minute bar open."""
     x = df.copy().sort_values("ts").reset_index(drop=True)
@@ -201,7 +225,7 @@ def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, commission_pct: 
         if pos is not None and session != pos["session"]:
             prev = x.iloc[i - 1]
             trades.append(finish(pos, prev["ts"], float(prev["close_fut"]), "session_boundary",
-                                 commission_pct, slip, int(pos["lot_size"])))
+                                 cost_model, slip, int(pos["lot_size"])))
             pos = None
         if pending is not None and (
             session != pending["session"]
@@ -256,7 +280,7 @@ def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, commission_pct: 
             if exit_price is None and bool(row["flat_time"]):
                 exit_price, reason = float(row["close_fut"]), "intraday_flat"
             if exit_price is not None:
-                trades.append(finish(pos, ts, float(exit_price), reason, commission_pct, slip,
+                trades.append(finish(pos, ts, float(exit_price), reason, cost_model, slip,
                                      int(pos["lot_size"])))
                 pos = None
                 exited_this_bar = True
@@ -282,7 +306,7 @@ def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, commission_pct: 
     if pos is not None and len(x):
         row = x.iloc[-1]
         trades.append(finish(pos, row["ts"], float(row["close_fut"]), "end_of_data",
-                             commission_pct, slip, int(pos["lot_size"])))
+                             cost_model, slip, int(pos["lot_size"])))
     return pd.DataFrame(trades)
 
 
@@ -310,14 +334,14 @@ def main() -> int:
     p.add_argument("--data-root", type=Path, default=DEFAULT_ROOT)
     p.add_argument("--spot-root", type=Path, default=DEFAULT_SPOT)
     p.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
-    p.add_argument("--commission-pct", type=float, default=0.03,
-                   help="estimated commission percent per side (not broker-accurate)")
+    p.add_argument("--cost-model", choices=("upstox", "zero"), default="upstox",
+                   help="Upstox NSE futures estimated statutory charges or zero-fee diagnostic")
     p.add_argument("--slippage-points", type=float, default=2.0, help="assumed points per side")
     p.add_argument("--rr", type=float, default=1.5)
     p.add_argument("--atr-buffer", type=float, default=0.1)
     a = p.parse_args()
     assert_paper_trading_only()
-    if a.commission_pct < 0 or a.slippage_points < 0 or a.rr <= 0 or a.atr_buffer < 0:
+    if a.slippage_points < 0 or a.rr <= 0 or a.atr_buffer < 0:
         p.error("costs/buffer must be nonnegative and rr must be positive")
     a.out_dir.mkdir(parents=True, exist_ok=True)
     summaries, all_trades, coverage_rows = [], [], []
@@ -344,7 +368,7 @@ def main() -> int:
               f"coverage={'INCOMPLETE' if not unavailable.empty else 'COMPLETE'}")
         # Restrict to the dates covered by the verified causal selection and matching spot bars.
         for vf in (False, True):
-            trades = run_one(merged, symbol, vf, a.commission_pct, a.slippage_points, a.rr, a.atr_buffer, 1)
+            trades = run_one(merged, symbol, vf, a.cost_model, a.slippage_points, a.rr, a.atr_buffer, 1)
             if not trades.empty:
                 trades["volume_filter"] = vf
                 all_trades.append(trades)
@@ -380,7 +404,7 @@ def main() -> int:
     print(f"Reports: {a.out_dir.resolve()}")
     print("PAPER | RESEARCH ONLY | ORDERS: 0")
     print("Caveat: signals use spot-index pivots/EMA/RSI; fills, ATR stops and volume use selected futures. "
-          "Fees are estimates, not broker-accurate. OOS is 2026-06-01 onward.")
+          "Fees use estimated Upstox NSE futures rates, not contract-note exact; check historical rate changes. OOS is 2026-06-01 onward.")
     if any(r["coverage_status"] != "COMPLETE" for r in coverage_rows):
         print("IMPORTANT: INCOMPLETE DATA COVERAGE. Do not treat these metrics as a fully covered backtest; "
               "see data_coverage.csv. Missing sessions were not imputed.")
