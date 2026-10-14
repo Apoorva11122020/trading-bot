@@ -218,7 +218,7 @@ def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, commission_pct: 
                 pos = None
         if pos is None and not (trades and trades[-1]["exit_ts"] == ts):
             vol_ok = (pd.notna(row["vol_avg20_fut"]) and row["vol_avg20_fut"] > 0 and
-                      row["volume"] > row["vol_avg20_fut"] * 1.2)
+                      row["volume_fut"] > row["vol_avg20_fut"] * 1.2)
             long_signal = bool(row["long_signal"]) and (vol_ok or not volume_filter)
             short_signal = bool(row["short_signal"]) and (vol_ok or not volume_filter)
             if long_signal or short_signal:
