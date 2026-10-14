@@ -198,13 +198,15 @@ def upstox_futures_fees_inr(
     sell = sell_price * lot
     turnover = buy + sell
     brokerage = min(20.0, buy * 0.0005) + min(20.0, sell * 0.0005)
-    exchange_rate = lambda d: 0.0000183 if d >= date(2026, 3, 1) else 0.0000173
-    exchange = buy * exchange_rate(buy_date) + sell * exchange_rate(sell_date)
+    # Use total exchange + IPFT outflow on both sides. Before 2026-03-01 this
+    # was 0.00173% transaction + 0.00010% IPFT; from that date the combined
+    # rate is 0.00183%. Total cost is unchanged across the effective date.
+    exchange_and_ipft = turnover * 0.0000183
     sebi = turnover * 0.000001
     stamp = buy * 0.00002
     stt = sell * (0.0005 if sell_date >= date(2026, 4, 1) else 0.0002)
-    gst = (brokerage + exchange + sebi) * 0.18
-    return brokerage + exchange + sebi + stamp + stt + gst
+    gst = (brokerage + exchange_and_ipft + sebi) * 0.18
+    return brokerage + exchange_and_ipft + sebi + stamp + stt + gst
 
 
 def finish(pos: dict, ts, price: float, reason: str, cost_model: str, slip: float, lot: int) -> dict:
