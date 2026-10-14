@@ -52,3 +52,46 @@ def test_muhurat_futures_bars_are_not_reported_as_missing_intervals():
     assert summary["exact_matches"] == 12
     assert summary["missing_futures"] == 0
     assert rows[0]["mismatched"] == 0
+
+
+
+def test_budget_sunday_session_uses_regular_75_candle_grid():
+    day = date(2026, 2, 1)
+    slots = nf.session_slots(day)
+
+    assert len(slots) == 75
+    assert slots[0] == pd.Timestamp("2026-02-01 09:15:00", tz="Asia/Kolkata")
+    assert slots[-1] == pd.Timestamp("2026-02-01 15:25:00", tz="Asia/Kolkata")
+
+
+def test_budget_sunday_futures_candles_are_not_rejected_as_weekend():
+    day = date(2026, 2, 1)
+    slots = nf.session_slots(day)
+    frame = pd.DataFrame({
+        "timestamp": slots,
+        "open": [100.0] * len(slots),
+        "high": [101.0] * len(slots),
+        "low": [99.0] * len(slots),
+        "close": [100.0] * len(slots),
+        "volume": [1000.0] * len(slots),
+        "open_interest": [10000.0] * len(slots),
+    })
+
+    clean, invalid, info = nf.validate_futures(frame)
+    assert len(clean) == 75
+    assert invalid.empty
+    assert "WEEKEND" not in info["issues"]
+    assert nf.session_rows(
+        HistoricalContract(
+            instrument_key="NSE_FO|NIFTY_FUT_TEST",
+            underlying="NIFTY",
+            expiry=date(2026, 2, 24),
+            instrument_type="FUT",
+            lot_size=65,
+            source=EXPIRED,
+            trading_symbol="NIFTY FUT TEST",
+        ),
+        clean,
+        [day],
+        "FRONT_MONTH_CONTRACT",
+    ) == []
