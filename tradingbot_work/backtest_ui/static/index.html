@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Doc Pivot + PE Backtest</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --green: #22c55e;
+      --red: #ef4444;
+      --amber: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+    }
+    header h1 { margin: 0 0 0.25rem; font-size: 1.35rem; }
+    header p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+    main { max-width: 1200px; margin: 0 auto; padding: 1.5rem 2rem 3rem; }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .grid { display: grid; gap: 1rem; }
+    .grid-2 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; }
+    input, select {
+      width: 100%;
+      padding: 0.55rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0f172a;
+      color: var(--text);
+    }
+    .checks { display: flex; gap: 1.25rem; margin-top: 0.5rem; }
+    .checks label { display: flex; align-items: center; gap: 0.4rem; color: var(--text); }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.7rem 1.4rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: #334155; }
+    button.ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 0.45rem 0.85rem;
+      font-weight: 500;
+    }
+    button.ghost.active { border-color: var(--accent); color: var(--text); background: #172554; }
+    .metric {
+      background: #0f172a;
+      border-radius: 10px;
+      padding: 1rem;
+      border: 1px solid var(--border);
+    }
+    .metric .value { font-size: 1.6rem; font-weight: 700; }
+    .metric .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; }
+    .pos { color: var(--green); }
+    .neg { color: var(--red); }
+    .tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    .tab {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 0.45rem 0.85rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .tab.active { border-color: var(--accent); color: var(--text); background: #172554; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 0.45rem 0.5rem;
+      text-align: left;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .table-wrap { max-height: 420px; overflow: auto; }
+    #status, #compareStatus { color: var(--amber); min-height: 1.25rem; }
+    pre.report-md {
+      white-space: pre-wrap;
+      font-size: 0.8rem;
+      background: #0f172a;
+      padding: 1rem;
+      border-radius: 8px;
+      max-height: 500px;
+      overflow: auto;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge.weak { background: #451a1a; color: #fca5a5; }
+    .badge.mixed { background: #422006; color: #fcd34d; }
+    .badge.strong { background: #14532d; color: #86efac; }
+    .badge.combo { background: #1e3a5f; color: #93c5fd; }
+    .badge.single { background: #1f2937; color: #9ca3af; }
+    .badge.doc { background: #312e81; color: #c4b5fd; }
+    .badge.enhanced { background: #134e4a; color: #5eead4; }
+    .badge.alt { background: #3f3f46; color: #d4d4d8; }
+    .strategy-desc { font-size: 0.78rem; color: var(--muted); margin-top: 0.35rem; }
+    tr.filter-row { cursor: pointer; }
+    tr.filter-row:hover { background: #172033; }
+    tr.filter-row.best { background: #14532d22; }
+    .best-picks {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .best-pick {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-size: 0.82rem;
+    }
+    .best-pick strong { display: block; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; }
+    .sort-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; align-items: center; }
+    .sort-bar span { font-size: 0.8rem; color: var(--muted); }
+    .exit-panel {
+      margin-top: 1rem;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+      font-size: 0.85rem;
+    }
+    .exit-panel h3 { margin: 0 0 0.75rem; font-size: 0.95rem; }
+    .exit-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.65rem;
+    }
+    .exit-stat {
+      background: var(--card);
+      border-radius: 8px;
+      padding: 0.6rem 0.7rem;
+      border: 1px solid var(--border);
+    }
+    .exit-stat .k { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; }
+    .exit-stat .v { font-size: 1.05rem; font-weight: 600; margin-top: 0.15rem; }
+    .exit-note { margin: 0.75rem 0 0; font-size: 0.78rem; color: var(--muted); }
+    .compare-table-wrap { overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Strategy Backtest Lab</h1>
+    <p>Backtest + live paper tracker • doc pure vs optimized • paper only • Upstox data</p>
+  </header>
+  <main>
+    <section id="recommendedBanner" class="panel" style="border-color:#3b82f6;background:#17255433;"></section>
+
+    <section id="livePanel" class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+        <h2 style="margin:0;font-size:1.1rem;">Live paper — aaj ka market (no real orders)</h2>
+        <span id="liveStatusBadge" class="badge weak">STOPPED</span>
+      </div>
+      <p style="font-size:0.8rem;color:var(--muted);margin:0.5rem 0 1rem;">
+        Selected strategy pack se live signals. Mon–Fri 09:00–15:15 IST. Terminal ki zaroorat nahi — yahi screen client ko dikhao.
+      </p>
+      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+        <button id="liveStartBtn" type="button">Start live paper</button>
+        <button class="secondary" id="liveStopBtn" type="button" disabled>Stop</button>
+        <span id="liveStatusText" style="color:var(--muted);font-size:0.85rem;"></span>
+      </div>
+      <div class="grid grid-4" id="liveMetrics"></div>
+      <div class="table-wrap" style="margin-top:1rem;max-height:280px;" id="liveEventLog"></div>
+    </section>
+
+    <section class="panel">
+      <div class="grid grid-2">
+        <div>
+          <label for="start">Start date</label>
+          <input type="date" id="start" />
+        </div>
+        <div>
+          <label for="end">End date</label>
+          <input type="date" id="end" />
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label for="strategySelect">Strategy pack</label>
+          <select id="strategySelect"></select>
+          <p class="strategy-desc" id="strategyDesc"></p>
+        </div>
+        <div>
+          <label for="preset">Pivot preset (advanced)</label>
+          <select id="preset">
+            <option value="guide_baseline" selected>Doc guide (original)</option>
+            <option value="client_v1">Client v1 (short-only improved)</option>
+            <option value="v5_short_only">Frozen v5 short-only</option>
+          </select>
+        </div>
+        <div>
+          <label for="guideFilter">Doc guide filter</label>
+          <select id="guideFilter"></select>
+        </div>
+        <div>
+          <label for="rrSelect">Risk / Reward (target)</label>
+          <select id="rrSelect"></select>
+        </div>
+        <div>
+          <label for="atrSelect">Stop ATR buffer</label>
+          <select id="atrSelect"></select>
+        </div>
+        <div>
+          <label>Symbols</label>
+          <div class="checks">
+            <label><input type="checkbox" id="sym-nifty" checked /> NIFTY</label>
+            <label><input type="checkbox" id="sym-bn" /> BANKNIFTY</label>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:1rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+        <button id="runBtn">Run backtest</button>
+        <button class="secondary" id="compareStrategiesBtn" type="button">Compare all strategies</button>
+        <button class="secondary" id="compareBtn" type="button">Compare doc filters</button>
+        <button class="secondary" id="threeMonthBtn" type="button">3 months</button>
+        <button class="secondary" id="sixMonthBtn" type="button">6 months</button>
+        <span id="status"></span>
+      </div>
+      <p style="margin:0.75rem 0 0;font-size:0.8rem;color:var(--muted);">
+        <strong>Doc pure</strong> = bilkul guide jaisa (no filter). <strong>Doc optimized</strong> = best backtest combo.
+        PE (where enabled): morning −200 pts → cross open−70 → BUY PE 2 lots, SL 20 premium.
+        Compare strategies ranks all packs; compare doc filters ranks only guide filters on pivot.
+      </p>
+    </section>
+
+    <section id="strategyComparePanel" class="panel" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+        <h2 style="margin:0;font-size:1.1rem;">Strategy ranking (all packs)</h2>
+        <span id="strategyCompareStatus"></span>
+      </div>
+      <div class="best-picks" id="strategyBestPicks"></div>
+      <div class="sort-bar" id="strategySortBar">
+        <span>Sort by:</span>
+        <button class="ghost active" data-strategy-sort="net" type="button">Net profit</button>
+        <button class="ghost" data-strategy-sort="win" type="button">Win %</button>
+      </div>
+      <div class="table-wrap compare-table-wrap" id="strategyCompareTable"></div>
+      <p id="strategyCompareNote" style="font-size:0.8rem;color:var(--muted);margin-top:0.75rem;"></p>
+    </section>
+
+    <section id="comparePanel" class="panel" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+        <h2 style="margin:0;font-size:1.1rem;">Filter ranking (pivot only)</h2>
+        <span id="compareStatus"></span>
+      </div>
+      <div class="best-picks" id="bestPicks"></div>
+      <div class="sort-bar">
+        <span>Sort by:</span>
+        <button class="ghost active" data-sort="net" type="button">Net profit</button>
+        <button class="ghost" data-sort="win" type="button">Win %</button>
+        <button class="ghost" data-sort="balanced" type="button">Balanced score</button>
+      </div>
+      <div class="table-wrap compare-table-wrap" id="compareTable"></div>
+      <p id="compareNote" style="font-size:0.8rem;color:var(--muted);margin-top:0.75rem;"></p>
+    </section>
+
+    <section id="results" class="panel" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+        <h2 style="margin:0;font-size:1.1rem;">Results</h2>
+        <span id="verdictBadge" class="badge weak"></span>
+      </div>
+      <div class="grid grid-4" style="margin-top:1rem;" id="metricCards"></div>
+      <div id="exitAnalytics" class="exit-panel" hidden></div>
+
+      <div class="tabs" style="margin-top:1.25rem;" id="tabBar">
+        <button class="tab active" data-tab="daily">Daily summary</button>
+        <button class="tab" data-tab="pivot">Pivot trades</button>
+        <button class="tab" data-tab="pe">PE trades</button>
+        <button class="tab" data-tab="monthly">Monthly</button>
+        <button class="tab" data-tab="symbol">By symbol</button>
+        <button class="tab" data-tab="report">Full report</button>
+      </div>
+      <div id="tabContent" class="table-wrap"></div>
+      <p id="outPath" style="font-size:0.8rem;color:var(--muted);margin-top:0.75rem;"></p>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let lastTables = {};
+    let activeTab = "daily";
+    let compareSort = "net";
+    let lastCompare = null;
+    let lastStrategyCompare = null;
+    let strategyCompareSort = "net";
+    let strategyCatalog = [];
+
+    function isoDate(d) {
+      return d.toISOString().slice(0, 10);
+    }
+
+    function initDates(months = 6) {
+      const end = new Date();
+      const start = new Date();
+      start.setMonth(start.getMonth() - months);
+      $("end").value = isoDate(end);
+      $("start").value = isoDate(start);
+    }
+
+    async function loadStrategies() {
+      try {
+        const res = await fetch("/api/strategies");
+        if (!res.ok) throw new Error("API " + res.status);
+        const body = await res.json();
+        strategyCatalog = body.strategies || [];
+        $("strategySelect").innerHTML = strategyCatalog.map(s => {
+          const tag = s.kind === "doc" ? " [DOC]" : s.kind === "alt" ? " [ALT]" : "";
+          return `<option value="${s.id}">${s.label}${tag}</option>`;
+        }).join("");
+        $("strategySelect").value = "doc_optimized";
+        applyStrategyFromSelect();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function applyStrategyFromSelect() {
+      const sid = $("strategySelect").value;
+      const spec = strategyCatalog.find(s => s.id === sid);
+      if (!spec) return;
+      $("strategyDesc").textContent = spec.description || "";
+      const isAlt = spec.kind === "alt" && !spec.preset;
+      $("preset").disabled = isAlt;
+      $("guideFilter").disabled = isAlt || $("preset").value !== "guide_baseline";
+      if (spec.preset) $("preset").value = spec.preset;
+      if (spec.guide_filter) $("guideFilter").value = spec.guide_filter;
+      if (spec.rr != null) $("rrSelect").value = String(spec.rr);
+      if (spec.atr_buffer != null) $("atrSelect").value = String(spec.atr_buffer);
+      const syms = spec.default_symbols || ["NIFTY"];
+      $("sym-nifty").checked = syms.includes("NIFTY");
+      $("sym-bn").checked = syms.includes("BANKNIFTY");
+      toggleGuideFilter();
+    }
+
+    async function loadGuideFilters() {
+      try {
+        const res = await fetch("/api/guide-filters");
+        if (!res.ok) throw new Error("API " + res.status + " — server restart karo: python scripts\\run_backtest_ui.py --force");
+        const body = await res.json();
+        $("guideFilter").innerHTML = body.filters.map(f => {
+          const tag = f.kind === "combo" ? " [COMBO]" : "";
+          return `<option value="${f.id}">${f.label}${tag}</option>`;
+        }).join("");
+        $("guideFilter").value = "short_nifty_11_13+one_per_day";
+      } catch (e) {
+        $("status").textContent = "Server purana hai ya band hai. Terminal mein chalao: python scripts\\run_backtest_ui.py --force";
+        console.error(e);
+      }
+    }
+
+    async function loadRrOptions() {
+      try {
+        const res = await fetch("/api/rr-options");
+        if (!res.ok) return;
+        const body = await res.json();
+        $("rrSelect").innerHTML = body.choices.map(c =>
+          `<option value="${c.value}">${c.label}</option>`
+        ).join("");
+        $("rrSelect").value = String(body.default ?? 2);
+      } catch (e) {
+        $("rrSelect").innerHTML = `
+          <option value="1.5">1:1.5</option>
+          <option value="2" selected>1:2</option>
+          <option value="2.5">1:2.5</option>`;
+      }
+    }
+
+    function selectedRr() {
+      return Number($("rrSelect").value || 1.5);
+    }
+
+    async function loadAtrOptions() {
+      try {
+        const res = await fetch("/api/atr-buffer-options");
+        if (!res.ok) return;
+        const body = await res.json();
+        $("atrSelect").innerHTML = body.choices.map(c =>
+          `<option value="${c.value}">${c.label}</option>`
+        ).join("");
+        $("atrSelect").value = String(body.default ?? 0.08);
+      } catch (e) {
+        $("atrSelect").innerHTML = `
+          <option value="0.05" selected>0.05 tight</option>
+          <option value="0.1">0.10 doc default</option>
+          <option value="0.15">0.15 wide</option>`;
+      }
+    }
+
+    function selectedAtrBuffer() {
+      return Number($("atrSelect").value || 0.05);
+    }
+
+    function toggleGuideFilter() {
+      const isGuide = $("preset").value === "guide_baseline";
+      $("guideFilter").disabled = !isGuide;
+    }
+
+    function selectedSymbols() {
+      const syms = [];
+      if ($("sym-nifty").checked) syms.push("NIFTY");
+      if ($("sym-bn").checked) syms.push("BANKNIFTY");
+      return syms;
+    }
+
+    async function readApiResponse(res) {
+      const text = await res.text();
+      let body = null;
+      try { body = text ? JSON.parse(text) : null; } catch { body = null; }
+      if (!res.ok) {
+        const msg = body?.detail || body?.message || text || ("HTTP " + res.status);
+        throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+      }
+      return body;
+    }
+
+    function fmtNum(n, digits = 2) {
+      if (n === null || n === undefined || n === "") return "—";
+      const x = Number(n);
+      if (Number.isNaN(x)) return String(n);
+      return x.toFixed(digits);
+    }
+
+    function renderMetrics(data) {
+      const p = data.pivot;
+      const pe = data.pe;
+      const d = data.daily;
+      const s = data.score;
+      const cards = [
+        { label: "Pivot win %", value: `${fmtNum(p.win_rate_pct, 1)}%`, cls: p.win_rate_pct >= 40 ? "pos" : "neg" },
+        { label: "Pivot net (pts)", value: fmtNum(p.net, 2), cls: p.net >= 0 ? "pos" : "neg" },
+        { label: "Profitable days %", value: `${fmtNum(d.profitable_day_pct, 1)}%`, cls: "" },
+        { label: "Effectiveness", value: `${fmtNum(s.overall_score, 1)}/100`, cls: "" },
+        { label: "Pivot trades", value: p.trades, cls: "" },
+        { label: "Profit factor", value: p.profit_factor ?? "n/a", cls: "" },
+        { label: "PE signals", value: pe.trades, cls: "" },
+        { label: "PE net (INR)", value: fmtNum(pe.net, 0), cls: pe.net >= 0 ? "pos" : "neg" },
+      ];
+      $("metricCards").innerHTML = cards.map(c => `
+        <div class="metric">
+          <div class="label">${c.label}</div>
+          <div class="value ${c.cls}">${c.value}</div>
+        </div>`).join("");
+      const badge = $("verdictBadge");
+      badge.textContent = s.verdict;
+      badge.className = "badge " + (s.verdict === "STRONG" ? "strong" : s.verdict === "MIXED" ? "mixed" : "weak");
+      renderExitAnalytics(data.exit_analytics, data.rr);
+    }
+
+    function renderExitAnalytics(exitStats, rr) {
+      const panel = $("exitAnalytics");
+      if (!exitStats || !exitStats.trades) {
+        panel.hidden = true;
+        return;
+      }
+      const be = exitStats.breakeven_win_rate_pct;
+      const theo = exitStats.theoretical_breakeven_win_rate_pct;
+      const beCls = be != null && exitStats.trades ? "" : "";
+      panel.hidden = false;
+      panel.innerHTML = `
+        <h3>Exit breakdown — kahan P&amp;L ja raha hai</h3>
+        <div class="exit-grid">
+          <div class="exit-stat"><div class="k">Target exits</div><div class="v">${exitStats.target_hits}</div></div>
+          <div class="exit-stat"><div class="k">Stop exits</div><div class="v">${exitStats.stop_hits}</div></div>
+          <div class="exit-stat"><div class="k">Flat / EOD</div><div class="v">${exitStats.flat_exits}</div></div>
+          <div class="exit-stat"><div class="k">Avg net win</div><div class="v pos">${exitStats.avg_net_win_r ?? "—"}R · ${fmtNum(exitStats.avg_win_points, 1)} pts</div></div>
+          <div class="exit-stat"><div class="k">Avg net loss</div><div class="v neg">${exitStats.avg_net_loss_r ?? "—"}R · ${fmtNum(exitStats.avg_loss_points, 1)} pts</div></div>
+          <div class="exit-stat"><div class="k">Cost / trade</div><div class="v">${fmtNum(exitStats.avg_cost_points, 1)} pts</div></div>
+          <div class="exit-stat"><div class="k">Theoretical BE win %</div><div class="v">${theo != null ? theo + "%" : "—"} <span style="font-size:0.75rem;color:var(--muted)">(RR 1:${rr || "?"}, no cost)</span></div></div>
+          <div class="exit-stat"><div class="k">Real BE win %</div><div class="v ${beCls}">${be != null ? be + "%" : "—"} <span style="font-size:0.75rem;color:var(--muted)">(after slippage+comm)</span></div></div>
+        </div>
+        <p class="exit-note">Gross target/stop usually hits +${rr || "?"}R / −1R, but ~${fmtNum(exitStats.avg_cost_points, 0)} pts cost per trade shrinks wins and deepens losses. Win % above <strong>Real BE</strong> is needed for net profit.</p>`;
+    }
+
+    function renderTable(rows) {
+      if (!rows || !rows.length) return "<p style='color:var(--muted)'>No data.</p>";
+      const cols = Object.keys(rows[0]);
+      const head = cols.map(c => `<th>${c}</th>`).join("");
+      const body = rows.map(r => `<tr>${cols.map(c => `<td>${r[c]}</td>`).join("")}</tr>`).join("");
+      return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }
+
+    function showTab(name) {
+      activeTab = name;
+      document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+      const map = {
+        daily: "daily_summary",
+        pivot: "pivot_trades",
+        pe: "pe_trades",
+        monthly: "monthly_pivot_summary",
+        symbol: "symbol_summary",
+        report: "report_markdown",
+      };
+      const key = map[name];
+      if (name === "report" && lastTables.report_markdown) {
+        $("tabContent").innerHTML = `<pre class="report-md">${lastTables.report_markdown[0].content}</pre>`;
+        return;
+      }
+      $("tabContent").innerHTML = renderTable(lastTables[key] || []);
+    }
+
+    function kindBadge(kind) {
+      const map = { doc: "doc", enhanced: "enhanced", alt: "alt" };
+      const cls = map[kind] || "single";
+      return `<span class="badge ${cls}">${kind}</span>`;
+    }
+
+    function renderStrategyCompareTable(data) {
+      const rows = data.rows || [];
+      const body = rows.map((r, i) => {
+        const netCls = r.net_points >= 0 ? "pos" : "neg";
+        const bestCls = i === 0 ? " best" : "";
+        return `<tr class="filter-row${bestCls}" data-strategy="${r.strategy_id}" title="PE ${r.pe_trades || 0} signals">
+          <td>${i + 1}</td>
+          <td>${kindBadge(r.kind)} ${r.strategy_label}</td>
+          <td>${r.trades}</td>
+          <td>${fmtNum(r.win_rate_pct, 1)}%</td>
+          <td class="${netCls}">${fmtNum(r.net_points, 1)}</td>
+          <td>${r.profit_factor ?? "n/a"}</td>
+          <td>${r.pe_net_inr != null ? "₹" + fmtNum(r.pe_net_inr, 0) : "—"}</td>
+          <td>${r.profitable ? "✓" : "—"}</td>
+        </tr>`;
+      }).join("");
+      $("strategyCompareTable").innerHTML = `
+        <table>
+          <thead><tr>
+            <th>#</th><th>Strategy</th><th>Trades</th><th>Win %</th>
+            <th>Pivot net pts</th><th>PF</th><th>PE net</th><th>+</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>`;
+
+      const picks = [
+        { title: "Best net (pivot)", row: data.best_net },
+        { title: "Best win %", row: data.best_win },
+      ];
+      $("strategyBestPicks").innerHTML = picks.map(p => {
+        if (!p.row) return "";
+        return `<div class="best-pick">
+          <strong>${p.title}</strong>
+          ${p.row.strategy_label}<br>
+          Win ${fmtNum(p.row.win_rate_pct, 1)}% · Net ${fmtNum(p.row.net_points, 1)} pts
+        </div>`;
+      }).join("");
+
+      const note = data.any_profitable
+        ? "At least one strategy was net profitable on pivot in this period."
+        : "No strategy was net profitable on pivot in this period. Try 6-month range — last 3 months often negative.";
+      const cfg = data.rr ? ` | RR 1:${data.rr} | ATR ${data.atr_buffer}` : "";
+      $("strategyCompareNote").textContent = note + ` Range: ${data.report_start} → ${data.report_end}${cfg}. Click row to select.`;
+
+      document.querySelectorAll("#strategyCompareTable .filter-row").forEach(tr => {
+        tr.addEventListener("click", () => {
+          $("strategySelect").value = tr.dataset.strategy;
+          applyStrategyFromSelect();
+          $("status").textContent = `Selected: ${tr.dataset.strategy}. Running backtest…`;
+          runBacktest();
+        });
+      });
+    }
+
+    async function compareStrategies() {
+      $("compareStrategiesBtn").disabled = true;
+      $("strategyCompareStatus").textContent = "Ranking all strategies… (may take 5–15 min)";
+      $("strategyComparePanel").hidden = false;
+      try {
+        const res = await fetch("/api/compare-strategies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            start: $("start").value,
+            end: $("end").value,
+            sort_by: strategyCompareSort,
+            rr: selectedRr(),
+            atr_buffer: selectedAtrBuffer(),
+          }),
+        });
+        const body = await readApiResponse(res);
+        lastStrategyCompare = body;
+        renderStrategyCompareTable(body);
+        $("strategyCompareStatus").textContent = `Done — ${body.rows.length} strategies ranked.`;
+      } catch (e) {
+        $("strategyCompareStatus").textContent = "Error: " + e.message;
+      } finally {
+        $("compareStrategiesBtn").disabled = false;
+      }
+    }
+
+    function renderCompareTable(data) {
+      const rows = data.rows || [];
+      const bestId = rows[0]?.filter_id;
+      const body = rows.map((r, i) => {
+        const netCls = r.net_points >= 0 ? "pos" : "neg";
+        const kindBadge = r.kind === "combo"
+          ? '<span class="badge combo">combo</span>'
+          : '<span class="badge single">single</span>';
+        const bestCls = i === 0 ? " best" : "";
+        const winVsBe = r.breakeven_win_rate_pct != null
+          ? (r.win_rate_pct >= r.breakeven_win_rate_pct ? "pos" : "neg") : "";
+        return `<tr class="filter-row${bestCls}" data-filter="${r.filter_id}" title="Target ${r.target_hits ?? 0} | Stop ${r.stop_hits ?? 0} | Flat ${r.flat_exits ?? 0}">
+          <td>${i + 1}</td>
+          <td>${kindBadge} ${r.filter_label}</td>
+          <td>${r.trades}</td>
+          <td class="${winVsBe}">${fmtNum(r.win_rate_pct, 1)}%</td>
+          <td class="${netCls}">${fmtNum(r.net_points, 1)}</td>
+          <td>${r.profit_factor ?? "n/a"}</td>
+          <td>${r.avg_net_win_r ?? "—"} / ${r.avg_net_loss_r ?? "—"}</td>
+          <td>${r.breakeven_win_rate_pct != null ? r.breakeven_win_rate_pct + "%" : "—"}</td>
+          <td>${fmtNum(r.avg_cost_points, 0)}</td>
+          <td>${r.profitable ? "✓" : "—"}</td>
+        </tr>`;
+      }).join("");
+      $("compareTable").innerHTML = `
+        <table>
+          <thead><tr>
+            <th>#</th><th>Filter</th><th>Trades</th><th>Win %</th>
+            <th>Net pts</th><th>PF</th><th>WinR / LossR</th><th>Real BE%</th><th>Cost</th><th>+</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>`;
+
+      const picks = [
+        { title: "Best net", row: data.best_net },
+        { title: "Best win %", row: data.best_win },
+        { title: "Best balanced", row: data.best_balanced },
+      ];
+      $("bestPicks").innerHTML = picks.map(p => {
+        if (!p.row) return "";
+        return `<div class="best-pick">
+          <strong>${p.title}</strong>
+          ${p.row.filter_label}<br>
+          Win ${fmtNum(p.row.win_rate_pct, 1)}% · Net ${fmtNum(p.row.net_points, 1)} pts<br>
+          <span style="color:var(--muted)">Real BE ${p.row.breakeven_win_rate_pct ?? "—"}% · WinR ${p.row.avg_net_win_r ?? "—"}</span>
+        </div>`;
+      }).join("");
+
+      const note = data.any_profitable
+        ? "At least one filter was net profitable in this period."
+        : "No filter was net profitable in this period on spot data.";
+      const rrLabel = data.rr ? ` | RR 1:${data.rr}` : "";
+      const atrLabel = data.atr_buffer != null ? ` | ATR ${data.atr_buffer}` : "";
+      $("compareNote").textContent = note + ` Range: ${data.report_start} → ${data.report_end}${rrLabel}${atrLabel}. Win % green = above real break-even. Hover row for exit counts.`;
+
+      document.querySelectorAll(".filter-row").forEach(tr => {
+        tr.addEventListener("click", () => {
+          const fid = tr.dataset.filter;
+          $("preset").value = "guide_baseline";
+          $("guideFilter").value = fid;
+          toggleGuideFilter();
+          $("status").textContent = `Selected filter: ${fid}. Running full backtest with PE…`;
+          runBacktest();
+        });
+      });
+    }
+
+    async function compareFilters() {
+      const symbols = selectedSymbols();
+      if (!symbols.length) { $("compareStatus").textContent = "Select at least one symbol."; return; }
+      $("compareBtn").disabled = true;
+      $("compareStatus").textContent = "Comparing all filters… (pivot only, may take 2–10 min)";
+      $("comparePanel").hidden = false;
+      try {
+        const res = await fetch("/api/compare-filters", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            start: $("start").value,
+            end: $("end").value,
+            symbols,
+            sort_by: compareSort,
+            rr: selectedRr(),
+            atr_buffer: selectedAtrBuffer(),
+          }),
+        });
+        const body = await readApiResponse(res);
+        lastCompare = body;
+        renderCompareTable(body);
+        $("compareStatus").textContent = `Done — ${body.rows.length} filters ranked.`;
+      } catch (e) {
+        $("compareStatus").textContent = "Error: " + e.message;
+      } finally {
+        $("compareBtn").disabled = false;
+      }
+    }
+
+    async function runBacktest() {
+      const symbols = selectedSymbols();
+      if (!symbols.length) { $("status").textContent = "Select at least one symbol."; return; }
+      $("runBtn").disabled = true;
+      $("status").textContent = "Running backtest… please wait (may take several minutes).";
+      $("results").hidden = true;
+      try {
+        const res = await fetch("/api/backtest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            start: $("start").value,
+            end: $("end").value,
+            strategy_id: $("strategySelect").value,
+            preset: $("preset").value,
+            symbols,
+            guide_filter: $("preset").value === "guide_baseline" ? $("guideFilter").value : "none",
+            rr: selectedRr(),
+            atr_buffer: selectedAtrBuffer(),
+          }),
+        });
+        const body = await readApiResponse(res);
+        renderMetrics(body.summary);
+        lastTables = body.tables || {};
+        $("results").hidden = false;
+        const cfgTxt = [
+          body.summary.strategy_label || body.summary.strategy_id || "",
+          body.summary.rr ? `RR 1:${body.summary.rr}` : "",
+          body.summary.atr_buffer != null ? `ATR ${body.summary.atr_buffer}` : "",
+        ].filter(Boolean).join(" | ");
+        $("outPath").textContent = (cfgTxt ? cfgTxt + " | " : "") + "Saved to: " + body.summary.output_dir;
+        showTab(activeTab);
+        $("status").textContent = "Done.";
+      } catch (e) {
+        $("status").textContent = "Error: " + e.message;
+      } finally {
+        $("runBtn").disabled = false;
+      }
+    }
+
+    let livePollTimer = null;
+
+    async function loadRecommended() {
+      try {
+        const res = await fetch("/api/recommended-strategy");
+        const r = await res.json();
+        $("recommendedBanner").innerHTML = `
+          <strong style="color:#93c5fd;">Recommended for client demo: ${r.label}</strong>
+          <p style="margin:0.35rem 0 0;font-size:0.85rem;color:var(--muted);">
+            NIFTY · filter ${r.guide_filter} · RR 1:${r.rr} · ATR ${r.atr_buffer} ·
+            ${r.note}
+          </p>`;
+      } catch (_) { $("recommendedBanner").hidden = true; }
+    }
+
+    function renderLiveStatus(st) {
+      const badge = $("liveStatusBadge");
+      badge.textContent = st.running ? "LIVE" : "STOPPED";
+      badge.className = "badge " + (st.running ? "strong" : "weak");
+      $("liveStopBtn").disabled = !st.running;
+      $("liveStartBtn").disabled = st.running;
+      const cards = [
+        { label: "Strategy", value: st.strategy_label || "—" },
+        { label: "Closed trades", value: st.closed_trades ?? 0 },
+        { label: "Pivot net (pts)", value: fmtNum(st.pivot_net_points, 1), cls: (st.pivot_net_points || 0) >= 0 ? "pos" : "neg" },
+        { label: "Open position", value: st.open_position ? "YES" : "No" },
+      ];
+      $("liveMetrics").innerHTML = cards.map(c => `
+        <div class="metric"><div class="label">${c.label}</div>
+        <div class="value ${c.cls || ""}">${c.value}</div></div>`).join("");
+      const msg = st.running
+        ? `Listening · ${st.symbol} · events=${st.event_count}`
+        : (st.market_open ? "Ready — click Start" : "Market closed (Mon–Fri 09:00–15:15 IST)");
+      $("liveStatusText").textContent = msg;
+    }
+
+    async function refreshLive() {
+      try {
+        const res = await fetch("/api/live/events?limit=100");
+        const body = await readApiResponse(res);
+        renderLiveStatus(body.status);
+        const events = body.events || [];
+        if (!events.length) {
+          $("liveEventLog").innerHTML = "<p style='color:var(--muted)'>No events yet today.</p>";
+          return;
+        }
+        const cols = ["timestamp", "event", "side", "entry", "stop", "target", "exit", "net_points", "reason"];
+        $("liveEventLog").innerHTML = renderTable(events.map(e => {
+          const row = {};
+          cols.forEach(c => { row[c] = e[c] ?? ""; });
+          return row;
+        }));
+      } catch (e) {
+        $("liveStatusText").textContent = "Live API error: " + e.message;
+      }
+    }
+
+    async function startLivePaper() {
+      $("liveStartBtn").disabled = true;
+      $("liveStatusText").textContent = "Starting live paper…";
+      try {
+        const res = await fetch("/api/live/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ strategy_id: $("strategySelect").value }),
+        });
+        const body = await readApiResponse(res);
+        renderLiveStatus(body);
+        if (!livePollTimer) livePollTimer = setInterval(refreshLive, 5000);
+        refreshLive();
+      } catch (e) {
+        $("liveStatusText").textContent = "Error: " + e.message;
+        $("liveStartBtn").disabled = false;
+      }
+    }
+
+    async function stopLivePaper() {
+      try {
+        const res = await fetch("/api/live/stop", { method: "POST" });
+        const body = await readApiResponse(res);
+        renderLiveStatus(body);
+        refreshLive();
+      } catch (e) {
+        $("liveStatusText").textContent = "Stop error: " + e.message;
+      }
+    }
+
+    $("runBtn").addEventListener("click", runBacktest);
+    $("liveStartBtn").addEventListener("click", startLivePaper);
+    $("liveStopBtn").addEventListener("click", stopLivePaper);
+    $("compareBtn").addEventListener("click", compareFilters);
+    $("compareStrategiesBtn").addEventListener("click", compareStrategies);
+    $("strategySelect").addEventListener("change", applyStrategyFromSelect);
+    $("preset").addEventListener("change", toggleGuideFilter);
+    $("threeMonthBtn").addEventListener("click", () => {
+      $("preset").value = "guide_baseline";
+      initDates(3);
+      toggleGuideFilter();
+      compareFilters();
+    });
+    $("sixMonthBtn").addEventListener("click", () => {
+      initDates(6);
+      compareStrategies();
+    });
+    document.querySelectorAll("#strategySortBar .ghost").forEach(btn => {
+      btn.addEventListener("click", () => {
+        strategyCompareSort = btn.dataset.strategySort;
+        document.querySelectorAll("#strategySortBar .ghost").forEach(b =>
+          b.classList.toggle("active", b.dataset.strategySort === strategyCompareSort));
+        if (lastStrategyCompare) compareStrategies();
+      });
+    });
+    document.querySelectorAll(".sort-bar .ghost").forEach(btn => {
+      btn.addEventListener("click", () => {
+        compareSort = btn.dataset.sort;
+        document.querySelectorAll(".sort-bar .ghost").forEach(b =>
+          b.classList.toggle("active", b.dataset.sort === compareSort));
+        if (lastCompare) compareFilters();
+      });
+    });
+    document.querySelectorAll(".tab").forEach(btn => {
+      btn.addEventListener("click", () => showTab(btn.dataset.tab));
+    });
+    Promise.all([loadStrategies(), loadGuideFilters(), loadRrOptions(), loadAtrOptions(), loadRecommended()]).then(() => {
+      initDates(6);
+      $("strategySelect").value = "doc_optimized";
+      applyStrategyFromSelect();
+      refreshLive();
+      setInterval(refreshLive, 15000);
+    });
+  </script>
+</body>
+</html>

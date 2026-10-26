@@ -24,6 +24,7 @@ def create_upstox_v3_feed(
     *,
     access_token: str | None = None,
     stale_after_seconds: int = 15,
+    mode: str = "ltpc",
 ) -> WebSocketMarketDataFeed:
     token, _ = resolve_market_data_access_token(access_token)
     try:
@@ -42,7 +43,7 @@ def create_upstox_v3_feed(
         return transport
 
     def subscribe(keys: list[str]) -> bytes:
-        return subscription_payload(keys, mode="ltpc")
+        return subscription_payload(keys, mode=mode)
 
     return WebSocketMarketDataFeed(
         url,

@@ -1,0 +1,99 @@
+//@version=6
+strategy("Classic Pivot Algo — Frozen v3 Hybrid", overlay=true, pyramiding=0,
+    initial_capital=200000, commission_type=strategy.commission.percent,
+    commission_value=0.03, slippage=2, process_orders_on_close=true)
+
+symbolPreset = input.string("NIFTY", "Symbol Preset", options=["NIFTY", "BANKNIFTY"])
+volMultiplier = input.float(1.2, "Volume Multiplier", minval=0.1, step=0.1)
+maxRiskPoints = input.float(symbolPreset == "NIFTY" ? 40.0 : 100.0, "Max Risk (points)", minval=1.0)
+useVolume = input.bool(true, "Volume Filter")
+useVwap = input.bool(true, "VWAP Alignment")
+useRSI = input.bool(true, "RSI Filter")
+useTrend = input.bool(true, "EMA Trend Filter")
+oneTradePerSide = input.bool(true, "One Long + One Short Per Session")
+rr = input.float(1.5, "Reward/Risk", minval=0.5, step=0.25)
+atrBuffer = input.float(0.1, "ATR Stop Buffer", minval=0, step=0.05)
+
+longStartMin = 9 * 60 + 30
+longEndMin = 11 * 60
+shortStartMin = symbolPreset == "NIFTY" ? 11 * 60 : 13 * 60
+shortEndMin = symbolPreset == "NIFTY" ? 13 * 60 : 15 * 60
+
+isFiveMinute = timeframe.isminutes and timeframe.multiplier == 5
+if barstate.isfirst and not isFiveMinute
+    runtime.error("Set the chart timeframe to 5 minutes.")
+
+[prevHigh, prevLow, prevClose] = request.security(
+    syminfo.tickerid, "D", [high[1], low[1], close[1]],
+    lookahead=barmerge.lookahead_on)
+pp = (prevHigh + prevLow + prevClose) / 3.0
+r1 = 2.0 * pp - prevLow
+s1 = 2.0 * pp - prevHigh
+
+ema20 = ta.ema(close, 20)
+ema50 = ta.ema(close, 50)
+rsiValue = ta.rsi(close, 14)
+atrValue = ta.atr(14)
+volAverage = ta.sma(volume, 20)
+
+typical = (high + low + close) / 3.0
+var float sessionCumPv = na
+var float sessionCumVol = na
+if ta.change(time("D")) != 0
+    sessionCumPv := 0.0
+    sessionCumVol := 0.0
+sessionCumPv += typical * nz(volume, 0.0)
+sessionCumVol += nz(volume, 0.0)
+sessionVwap = sessionCumVol > 0 ? sessionCumPv / sessionCumVol : na
+
+volumeOK = not useVolume or (not na(volume) and not na(volAverage) and volume > volAverage * volMultiplier)
+bullOK = (not useTrend or ema20 > ema50) and (not useRSI or rsiValue > 55) and
+    (not useVwap or (not na(sessionVwap) and close > sessionVwap)) and volumeOK
+bearOK = (not useTrend or ema20 < ema50) and (not useRSI or rsiValue < 45) and
+    (not useVwap or (not na(sessionVwap) and close < sessionVwap)) and volumeOK
+
+signalCutoff = timestamp(syminfo.timezone, year, month, dayofmonth, 15, 0)
+inSignalSession = time < signalCutoff
+signalBarMinute = hour(time, syminfo.timezone) * 60 + minute(time, syminfo.timezone)
+entryMinute = signalBarMinute + timeframe.multiplier
+inLongWindow = entryMinute >= longStartMin and entryMinute < longEndMin
+inShortWindow = entryMinute >= shortStartMin and entryMinute < shortEndMin
+
+crossUp = ta.crossover(close, pp) or ta.crossover(close, r1)
+crossDown = ta.crossunder(close, pp) or ta.crossunder(close, s1)
+longSignal = barstate.isconfirmed and inSignalSession and inLongWindow and crossUp and bullOK
+shortSignal = barstate.isconfirmed and inSignalSession and inShortWindow and crossDown and bearOK
+
+var int lastLongSession = na
+var int lastShortSession = na
+sessionId = time("D")
+canLong = not oneTradePerSide or na(lastLongSession) or lastLongSession != sessionId
+canShort = not oneTradePerSide or na(lastShortSession) or lastShortSession != sessionId
+
+if longSignal and canLong and strategy.position_size <= 0
+    stopPrice = low - atrValue * atrBuffer
+    risk = close - stopPrice
+    if risk > syminfo.mintick and risk <= maxRiskPoints
+        strategy.entry("Long", strategy.long)
+        strategy.exit("Long Exit", from_entry="Long", stop=stopPrice, limit=close + risk * rr)
+        if oneTradePerSide
+            lastLongSession := sessionId
+
+if shortSignal and canShort and strategy.position_size >= 0
+    stopPrice = high + atrValue * atrBuffer
+    risk = stopPrice - close
+    if risk > syminfo.mintick and risk <= maxRiskPoints
+        strategy.entry("Short", strategy.short)
+        strategy.exit("Short Exit", from_entry="Short", stop=stopPrice, limit=close - risk * rr)
+        if oneTradePerSide
+            lastShortSession := sessionId
+
+if hour(time, syminfo.timezone) == 15 and minute(time, syminfo.timezone) >= 15
+    strategy.close_all(comment="Session close")
+
+plot(pp, "PP", color=color.yellow, linewidth=2)
+plot(r1, "R1", color=color.green)
+plot(s1, "S1", color=color.red)
+plot(sessionVwap, "Session VWAP", color=color.new(color.fuchsia, 30))
+plot(ema20, "EMA 20", color=color.aqua)
+plot(ema50, "EMA 50", color=color.orange)

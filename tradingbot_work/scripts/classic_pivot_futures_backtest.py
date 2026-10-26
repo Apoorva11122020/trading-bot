@@ -186,8 +186,8 @@ def upstox_futures_fees_inr(
     Applies the rate effective on each transaction date: NSE transaction charge
     0.00183% per side from 2026-03-01 (0.00173% before), STT on the sell order
     0.02% before 2026-04-01 and 0.05% thereafter, SEBI fee 0.0001% per side,
-    stamp duty 0.002% on the buy order, and 18% GST on brokerage + exchange +
-    SEBI fees. Brokerage is capped at Rs 20 per order.
+    stamp duty 0.002% on the buy order, and 18% GST on brokerage + exchange/IPFT
+    charges. Brokerage is capped at Rs 20 per order.
     Does not model contract-note rounding or account-specific plans.
     """
     buy_price = entry if side == "LONG" else exit_price
@@ -205,7 +205,9 @@ def upstox_futures_fees_inr(
     sebi = turnover * 0.000001
     stamp = buy * 0.00002
     stt = sell * (0.0005 if sell_date >= date(2026, 4, 1) else 0.0002)
-    gst = (brokerage + exchange_and_ipft + sebi) * 0.18
+    # Upstox applies GST to brokerage + exchange transaction/IPFT charges;
+    # SEBI turnover fee is a separate statutory line and is not in that base.
+    gst = (brokerage + exchange_and_ipft) * 0.18
     return brokerage + exchange_and_ipft + sebi + stamp + stt + gst
 
 
@@ -232,10 +234,18 @@ def finish(pos: dict, ts, price: float, reason: str, cost_model: str, slip: floa
 
 
 def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, cost_model: str, slip: float,
-            rr: float, atr_buffer: float, lot: int) -> pd.DataFrame:
+            rr: float, atr_buffer: float, lot: int,
+            target_column: str | None = None,
+            breakeven_trigger_r: float | None = None,
+            max_risk_points: float | None = None,
+            one_trade_per_session: bool = False,
+            one_trade_per_side_per_session: bool = False) -> pd.DataFrame:
     """Simulate signals at candle close and enter at the next same-session 5-minute bar open."""
     x = df.copy().sort_values("ts").reset_index(drop=True)
     trades, pos, pending = [], None, None
+    traded_sessions: set[object] = set()
+    long_traded_sessions: set[object] = set()
+    short_traded_sessions: set[object] = set()
 
     for i, row in x.iterrows():
         ts, session = row["ts"], row["session"]
@@ -264,18 +274,29 @@ def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, cost_model: str,
                 if side == "LONG":
                     stop = float(signal_row["low_fut"] - float(a) * atr_buffer)
                     risk = entry - stop
-                    target = entry + risk * rr
+                    target = (float(signal_row[target_column]) if target_column and
+                              pd.notna(signal_row.get(target_column)) else entry + risk * rr)
                 else:
                     stop = float(signal_row["high_fut"] + float(a) * atr_buffer)
                     risk = stop - entry
-                    target = entry - risk * rr
-                if np.isfinite(risk) and risk > 0:
+                    target = (float(signal_row[target_column]) if target_column and
+                              pd.notna(signal_row.get(target_column)) else entry - risk * rr)
+                if target_column and ((side == "LONG" and target <= entry) or
+                                      (side == "SHORT" and target >= entry)):
+                    risk = float("nan")
+                if np.isfinite(risk) and risk > 0 and (max_risk_points is None or risk <= max_risk_points):
                     pos = {
                         "symbol": symbol, "side": side, "session": session, "entry_ts": ts,
                         "entry": entry, "stop": stop, "target": target,
+                        "initial_risk": risk, "breakeven_armed": False,
                         "contract": row["trading_symbol"], "expiry": str(row["expiry"])[:10],
                         "lot_size": int(row["lot_size"]),
                     }
+                    traded_sessions.add(session)
+                    if side == "LONG":
+                        long_traded_sessions.add(session)
+                    else:
+                        short_traded_sessions.add(session)
 
         exited_this_bar = False
         if pos is not None:
@@ -296,6 +317,27 @@ def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, cost_model: str,
                     exit_price, reason = pos["stop"], "stop"
                 elif row["low_fut"] <= pos["target"]:
                     exit_price, reason = pos["target"], "target"
+            # A close-confirmed +R threshold arms the cost-adjusted entry stop for
+            # the NEXT bar. Do not infer intrabar event order from OHLC candles.
+            if (exit_price is None and breakeven_trigger_r is not None
+                    and not pos["breakeven_armed"]):
+                trigger = pos["entry"] + (pos["initial_risk"] * breakeven_trigger_r
+                                           * (1 if pos["side"] == "LONG" else -1))
+                confirmed = (float(row["close_fut"]) >= trigger if pos["side"] == "LONG"
+                             else float(row["close_fut"]) <= trigger)
+                reached = (float(row["high_fut"]) >= trigger if pos["side"] == "LONG"
+                           else float(row["low_fut"]) <= trigger)
+                if confirmed and reached:
+                    entry_date = pd.Timestamp(pos["entry_ts"]).date()
+                    fees_points = (
+                        upstox_futures_fees_inr(pos["entry"], pos["entry"], pos["side"],
+                                                int(pos["lot_size"]), entry_date, entry_date)
+                        / int(pos["lot_size"])
+                        if cost_model == "upstox" else 0.0
+                    )
+                    reserve = 2 * slip + fees_points
+                    pos["stop"] = pos["entry"] + reserve * (1 if pos["side"] == "LONG" else -1)
+                    pos["breakeven_armed"] = True
             if exit_price is None and bool(row["flat_time"]):
                 exit_price, reason = float(row["close_fut"]), "intraday_flat"
             if exit_price is not None:
@@ -306,6 +348,10 @@ def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, cost_model: str,
 
         # Queue a new signal after this bar closes; it can only fill on the next bar.
         if pos is None and not exited_this_bar and pending is None:
+            if one_trade_per_side_per_session:
+                pass
+            elif one_trade_per_session and session in traded_sessions:
+                continue
             vol_ok = (
                 pd.notna(row["vol_avg20_fut"])
                 and row["vol_avg20_fut"] > 0
@@ -313,6 +359,13 @@ def run_one(df: pd.DataFrame, symbol: str, volume_filter: bool, cost_model: str,
             )
             long_signal = bool(row["long_signal"]) and (vol_ok or not volume_filter)
             short_signal = bool(row["short_signal"]) and (vol_ok or not volume_filter)
+            if one_trade_per_side_per_session:
+                if session in long_traded_sessions:
+                    long_signal = False
+                if session in short_traded_sessions:
+                    short_signal = False
+            if long_signal and short_signal:
+                short_signal = False
             if long_signal or short_signal:
                 pending = {
                     "side": "LONG" if long_signal else "SHORT",

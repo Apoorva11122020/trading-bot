@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date
 from pathlib import Path
 import numpy as np
 import pandas as pd
+
+GUIDE_BASELINE_VERSION = "guide_baseline"
 
 DEFAULT_DATA = Path("data/historical/upstox_pivot_5m")
 DEFAULT_OUT = Path("reports/pivot_research_backtest")
@@ -83,6 +86,79 @@ def prepare(df: pd.DataFrame, volume_filter: bool) -> pd.DataFrame:
     x["long_signal"] = x["in_session"] & x["cross_up"] & x["bull_ok"]
     x["short_signal"] = x["in_session"] & x["cross_down"] & x["bear_ok"]
     return x
+
+
+def backtest_guide_day(
+    frame: pd.DataFrame,
+    label: str,
+    day: date,
+    *,
+    volume_filter: bool = False,
+    commission_pct: float = 0.03,
+    slippage_points: float = 2.0,
+    atr_buffer: float = 0.1,
+    rr: float = 1.5,
+) -> pd.DataFrame:
+    """One-session slice of the original strategy guide (classic pivot both sides)."""
+    x = prepare(frame, volume_filter)
+    day_rows = x.index[x.session == day].tolist()
+    trades: list[dict] = []
+    pos = None
+
+    for idx in day_rows:
+        row = x.loc[idx]
+        ts = row.ts
+
+        if pos is not None:
+            exit_price = None
+            reason = None
+            if pos["side"] == "LONG":
+                if row.low <= pos["stop"]:
+                    exit_price, reason = pos["stop"], "stop (stop-first)"
+                elif row.high >= pos["target"]:
+                    exit_price, reason = pos["target"], "target"
+            else:
+                if row.high >= pos["stop"]:
+                    exit_price, reason = pos["stop"], "stop (stop-first)"
+                elif row.low <= pos["target"]:
+                    exit_price, reason = pos["target"], "target"
+            if exit_price is None and bool(row.flat_time):
+                exit_price, reason = float(row.close), "intraday_flat"
+            if exit_price is not None:
+                trades.append(finish(pos, ts, float(exit_price), reason, commission_pct, slippage_points))
+                pos = None
+
+        if pos is None and not (trades and trades[-1].get("exit_ts") == ts):
+            if bool(row.long_signal) or bool(row.short_signal):
+                side = "LONG" if bool(row.long_signal) else "SHORT"
+                entry = float(row.close)
+                atr_val = row.atr14
+                if pd.notna(atr_val):
+                    if side == "LONG":
+                        stop = float(row.low - atr_val * atr_buffer)
+                        risk = entry - stop
+                        target = entry + risk * rr
+                    else:
+                        stop = float(row.high + atr_val * atr_buffer)
+                        risk = stop - entry
+                        target = entry - risk * rr
+                    if risk > 0 and np.isfinite(risk):
+                        pos = {
+                            "symbol": label,
+                            "side": side,
+                            "session": row.session,
+                            "entry_ts": ts,
+                            "entry": entry,
+                            "stop": stop,
+                            "target": target,
+                            "risk_points": risk,
+                            "volume_filter": volume_filter,
+                        }
+
+    if pos is not None and day_rows:
+        last = x.loc[day_rows[-1]]
+        trades.append(finish(pos, last.ts, float(last.close), "period_end", commission_pct, slippage_points))
+    return pd.DataFrame(trades)
 
 
 def backtest(df: pd.DataFrame, symbol: str, volume_filter: bool,

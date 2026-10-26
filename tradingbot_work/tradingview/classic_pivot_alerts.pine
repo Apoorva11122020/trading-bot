@@ -1,0 +1,153 @@
+//@version=6
+indicator("Classic Pivot Algo — Frozen v3 Hybrid", overlay=true)
+
+// v3 hybrid: morning long + afternoon short (separate quotas); NIFTY/BANKNIFTY futures 5m.
+
+symbolPreset = input.string("NIFTY", "Symbol Preset", options=["NIFTY", "BANKNIFTY"])
+rsiLength = input.int(14, "RSI Length", minval=2)
+volLength = input.int(20, "Volume Average Length", minval=2)
+volFactor = input.float(1.2, "Volume Multiplier", minval=0.1, step=0.1)
+atrLength = input.int(14, "ATR Length", minval=2)
+atrBuffer = input.float(0.1, "Stop Buffer (ATR)", minval=0, step=0.05)
+rr = input.float(1.5, "Target Risk/Reward", minval=0.5, step=0.25)
+maxRiskPoints = input.float(symbolPreset == "NIFTY" ? 40.0 : 100.0, "Max Risk (points)", minval=1.0)
+useVolume = input.bool(true, "Require Volume Confirmation")
+useVwap = input.bool(true, "Require VWAP Alignment")
+useTrend = input.bool(true, "Require EMA Trend")
+useRSI = input.bool(true, "Require RSI Confirmation")
+oneTradePerSide = input.bool(true, "One Long + One Short Per Session")
+
+// NIFTY PE recovery: down 200 pts from morning open, then cross up to only -70 pts -> BUY PE.
+enablePeRecovery = input.bool(true, "NIFTY PE Recovery Rule", tooltip="NIFTY only: after -200 from morning open, buy PE when spot crosses up to open-70.")
+peDropPoints = input.float(200.0, "PE: Morning Drop (pts)", minval=1.0)
+peRecoveryDown = input.float(70.0, "PE: Recovery To (pts below open)", minval=0.0)
+peLots = input.int(2, "PE: Lots", minval=1)
+peStopPremiumPts = input.float(20.0, "PE: Stop Loss (premium pts)", minval=0.5)
+
+longStartMin = 9 * 60 + 30
+longEndMin = 11 * 60
+shortStartMin = symbolPreset == "NIFTY" ? 11 * 60 : 13 * 60
+shortEndMin = symbolPreset == "NIFTY" ? 13 * 60 : 15 * 60
+
+isFiveMinute = timeframe.isminutes and timeframe.multiplier == 5
+if barstate.isfirst and not isFiveMinute
+    runtime.error("Set the chart timeframe to 5 minutes.")
+
+[prevHigh, prevLow, prevClose] = request.security(
+    syminfo.tickerid, "D", [high[1], low[1], close[1]],
+    lookahead=barmerge.lookahead_on)
+
+pp = (prevHigh + prevLow + prevClose) / 3.0
+r1 = 2.0 * pp - prevLow
+s1 = 2.0 * pp - prevHigh
+
+ema20 = ta.ema(close, 20)
+ema50 = ta.ema(close, 50)
+rsiValue = ta.rsi(close, rsiLength)
+volAverage = ta.sma(volume, volLength)
+atrValue = ta.atr(atrLength)
+
+typical = (high + low + close) / 3.0
+var float sessionCumPv = na
+var float sessionCumVol = na
+if ta.change(time("D")) != 0
+    sessionCumPv := 0.0
+    sessionCumVol := 0.0
+sessionCumPv += typical * nz(volume, 0.0)
+sessionCumVol += nz(volume, 0.0)
+sessionVwap = sessionCumVol > 0 ? sessionCumPv / sessionCumVol : na
+
+volumeOK = not useVolume or (not na(volume) and not na(volAverage) and volume > volAverage * volFactor)
+bullTrendOK = not useTrend or ema20 > ema50
+bearTrendOK = not useTrend or ema20 < ema50
+bullRSIOK = not useRSI or rsiValue > 55
+bearRSIOK = not useRSI or rsiValue < 45
+longVwapOK = not useVwap or (not na(sessionVwap) and close > sessionVwap)
+shortVwapOK = not useVwap or (not na(sessionVwap) and close < sessionVwap)
+
+signalCutoff = timestamp(syminfo.timezone, year, month, dayofmonth, 15, 0)
+inSignalSession = time < signalCutoff
+signalBarMinute = hour(time, syminfo.timezone) * 60 + minute(time, syminfo.timezone)
+entryMinute = signalBarMinute + timeframe.multiplier
+inLongWindow = entryMinute >= longStartMin and entryMinute < longEndMin
+inShortWindow = entryMinute >= shortStartMin and entryMinute < shortEndMin
+
+crossUp = ta.crossover(close, pp) or ta.crossover(close, r1)
+crossDown = ta.crossunder(close, pp) or ta.crossunder(close, s1)
+
+longStop = low - atrValue * atrBuffer
+longRisk = close - longStop
+longTarget = close + longRisk * rr
+shortStop = high + atrValue * atrBuffer
+shortRisk = shortStop - close
+shortTarget = close - shortRisk * rr
+
+validLong = barstate.isconfirmed and inSignalSession and inLongWindow and crossUp and
+    volumeOK and bullRSIOK and bullTrendOK and longVwapOK and longRisk > syminfo.mintick and
+    longRisk <= maxRiskPoints
+validShort = barstate.isconfirmed and inSignalSession and inShortWindow and crossDown and
+    volumeOK and bearRSIOK and bearTrendOK and shortVwapOK and shortRisk > syminfo.mintick and
+    shortRisk <= maxRiskPoints
+
+var int lastLongSession = na
+var int lastShortSession = na
+sessionId = time("D")
+canLong = not oneTradePerSide or na(lastLongSession) or lastLongSession != sessionId
+canShort = not oneTradePerSide or na(lastShortSession) or lastShortSession != sessionId
+fireLong = validLong and canLong
+fireShort = validShort and canShort
+if fireLong and oneTradePerSide
+    lastLongSession := sessionId
+if fireShort and oneTradePerSide
+    lastShortSession := sessionId
+
+var float morningOpen = na
+var float sessionLow = na
+var bool sawDeepDrop = false
+var bool peFiredToday = false
+if ta.change(time("D")) != 0
+    morningOpen := open
+    sessionLow := low
+    sawDeepDrop := false
+    peFiredToday := false
+else
+    sessionLow := math.min(sessionLow, low)
+if not na(morningOpen) and sessionLow <= morningOpen - peDropPoints
+    sawDeepDrop := true
+peRecoveryLevel = not na(morningOpen) ? morningOpen - peRecoveryDown : na
+peRecoverySignal = barstate.isconfirmed and symbolPreset == "NIFTY" and enablePeRecovery and
+    sawDeepDrop and not peFiredToday and not na(peRecoveryLevel) and ta.crossover(close, peRecoveryLevel)
+if peRecoverySignal
+    peFiredToday := true
+
+plot(pp, "PP", color=color.yellow, linewidth=2)
+plot(r1, "R1", color=color.new(color.green, 15))
+plot(s1, "S1", color=color.new(color.red, 15))
+plot(ema20, "EMA 20", color=color.aqua)
+plot(ema50, "EMA 50", color=color.orange)
+plot(sessionVwap, "Session VWAP", color=color.new(color.fuchsia, 30), linewidth=2)
+
+plotshape(fireLong, title="Long Signal", style=shape.labelup,
+    location=location.belowbar, color=color.green, text="LONG", textcolor=color.white)
+plotshape(fireShort, title="Short Signal", style=shape.labeldown,
+    location=location.abovebar, color=color.red, text="SHORT", textcolor=color.white)
+plotshape(peRecoverySignal, title="PE Recovery Signal", style=shape.diamond,
+    location=location.abovebar, color=color.orange, text="PE", textcolor=color.white)
+plot(peRecoveryLevel, "PE Recovery Level", color=color.new(color.orange, 40), linewidth=1, style=plot.style_linebr)
+
+if fireLong
+    alert("LONG | " + syminfo.ticker + " | 5m | Entry ref: " + str.tostring(close, format.mintick) +
+        " | SL: " + str.tostring(longStop, format.mintick) + " | Target: " +
+        str.tostring(longTarget, format.mintick) + " | Execute next bar open",
+        alert.freq_once_per_bar_close)
+if fireShort
+    alert("SHORT | " + syminfo.ticker + " | 5m | Entry ref: " + str.tostring(close, format.mintick) +
+        " | SL: " + str.tostring(shortStop, format.mintick) + " | Target: " +
+        str.tostring(shortTarget, format.mintick) + " | Execute next bar open",
+        alert.freq_once_per_bar_close)
+if peRecoverySignal
+    alert("BUY PE | NIFTY | lots=" + str.tostring(peLots) + " | spot_ref=" + str.tostring(close, format.mintick) +
+        " | morning_open=" + str.tostring(morningOpen, format.mintick) + " | session_low=" +
+        str.tostring(sessionLow, format.mintick) + " | recovery_level=" + str.tostring(peRecoveryLevel, format.mintick) +
+        " | PE_SL_premium_pts=" + str.tostring(peStopPremiumPts) + " | ATM PE auto-resolved in run_daily_pivot_paper.py",
+        alert.freq_once_per_bar_close)

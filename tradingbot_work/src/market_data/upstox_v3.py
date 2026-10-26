@@ -51,14 +51,19 @@ def decode_ticks(buffer:bytes, *, now:datetime|None=None) -> list[Tick]:
     ts_now=datetime.fromtimestamp(response.currentTs/1000, tz=timezone.utc) if response.currentTs else (now or datetime.now(timezone.utc))
     out=[]
     for symbol,feed in response.feeds.items():
+        cumulative_volume = 0.0
         ltpc = feed.ltpc if feed.WhichOneof("FeedUnion")=="ltpc" else None
         if feed.WhichOneof("FeedUnion")=="fullFeed":
             full=feed.fullFeed
-            ltpc=full.marketFF.ltpc if full.WhichOneof("FullFeedUnion")=="marketFF" else full.indexFF.ltpc
+            if full.WhichOneof("FullFeedUnion")=="marketFF":
+                ltpc=full.marketFF.ltpc
+                cumulative_volume=float(full.marketFF.vtt)
+            else:
+                ltpc=full.indexFF.ltpc
         elif feed.WhichOneof("FeedUnion")=="firstLevelWithGreeks": ltpc=feed.firstLevelWithGreeks.ltpc
         if ltpc is None or ltpc.ltp <= 0: continue
         ts=datetime.fromtimestamp(ltpc.ltt/1000, tz=timezone.utc) if ltpc.ltt else ts_now
-        out.append(Tick(symbol=symbol,timestamp=ts,ltp=float(ltpc.ltp),last_quantity=float(ltpc.ltq),volume=0.0))
+        out.append(Tick(symbol=symbol,timestamp=ts,ltp=float(ltpc.ltp),last_quantity=float(ltpc.ltq),volume=cumulative_volume))
     return out
 
 class UpstoxV3MarketDataAdapter:
